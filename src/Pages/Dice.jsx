@@ -190,7 +190,6 @@ function Dice({ user }) {
   const [targets, setTargets] = useState({ low: 5000, high: 5000 })
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
-  const [games, setGames] = useState([])
   const [showFairness, setShowFairness] = useState(false)
   const [currency, setCurrency] = useState(() => window.localStorage.getItem('currency') === 'coins' ? 'coins' : 'rocoins')
   const balance = Number(user?.[currency]) || 0
@@ -239,15 +238,6 @@ function Dice({ user }) {
     window.addEventListener('rorisk:currency-change', updateCurrency)
     return () => window.removeEventListener('rorisk:currency-change', updateCurrency)
   }, [])
-  useEffect(() => {
-    fetch('/api/dice/games')
-      .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((payload) => {
-        const loadedGames = payload.games || []
-        setGames(loadedGames)
-      })
-      .catch(() => {})
-  }, [])
   const setMode = (nextMode) => {
     setTargets((current) => mode === 'under' || mode === 'over'
       ? nextMode === 'under' || nextMode === 'over' ? normalizeTargets(nextMode, current.low, current.low) : normalizeTargets(nextMode, 2500, 7500)
@@ -266,7 +256,7 @@ function Dice({ user }) {
       if (!response.ok) throw new Error(payload.error || 'Unable to start this game.')
       incrementFairNonce(user, 1)
       setResult((current) => ({ ...payload.game, moveDirection: payload.game.roll < (current?.roll ?? 5000) ? 'moving-left' : 'moving-right' }))
-      setGames((current) => [payload.game, ...current].slice(0, 30))
+      window.dispatchEvent(new CustomEvent('rorisk:dice-bet', { detail: { game: payload.game } }))
       window.dispatchEvent(new CustomEvent('rorisk:user-update', { detail: { user: payload.user } }))
       playSound('roll')
       if (payload.game.won) playSound('success')
@@ -274,7 +264,7 @@ function Dice({ user }) {
   }
 
   const entryClass = entryPhase === 'from' ? ' page-enter-active page-enter-from' : entryPhase === 'active' ? ' page-enter-active' : ''
-  return <div className={`dice${entryClass}`} {...pageScope}><div className="dice-content" {...pageScope}><DiceHeader onFairness={openFairness} /><div className="dice-container" {...pageScope}><DiceControls amount={amount} setAmount={setAmount} balance={balance} currency={currency} mode={mode} setMode={setMode} busy={busy} onPlay={play} onFairness={openFairness} /><DiceGame mode={mode} setMode={setMode} low={targets.low} high={targets.high} setTargets={setTargets} result={result} openingMotion={openingMotion} /></div></div><Bets games={games} />{showFairness && <ModalAnimation label="Seed Fairness" onClose={() => setShowFairness(false)}><FairSeedModal user={user} /></ModalAnimation>}</div>
+  return <div className={`dice${entryClass}`} {...pageScope}><div className="dice-content" {...pageScope}><DiceHeader onFairness={openFairness} /><div className="dice-container" {...pageScope}><DiceControls amount={amount} setAmount={setAmount} balance={balance} currency={currency} mode={mode} setMode={setMode} busy={busy} onPlay={play} onFairness={openFairness} /><DiceGame mode={mode} setMode={setMode} low={targets.low} high={targets.high} setTargets={setTargets} result={result} openingMotion={openingMotion} /></div></div><Bets />{showFairness && <ModalAnimation label="Seed Fairness" onClose={() => setShowFairness(false)}><FairSeedModal user={user} /></ModalAnimation>}</div>
 }
 
 export default Dice
