@@ -1,0 +1,9 @@
+# Never upload local secrets or machine state with a deployment.
+.env
+.env.*
+!.env.example
+.logs
+.tmp-*
+*.log
+dist
+node_modules

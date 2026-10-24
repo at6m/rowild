@@ -45,7 +45,7 @@ async function readJson(request) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
 }
 
-function hmac(value, secret) {
+export function hmac(value, secret) {
   return createHmac('sha256', secret).update(value).digest('base64url')
 }
 
@@ -262,7 +262,7 @@ async function getRobloxHeadshot(robloxId) {
   }
 }
 
-async function supabaseRequest(env, path, options = {}) {
+export async function supabaseRequest(env, path, options = {}) {
   const serverKeys = [...new Set([env.SUPABASE_SECRET_KEY, env.SUPABASE_SERVICE_ROLE_KEY].filter(Boolean))]
   if (!env.SUPABASE_URL || !serverKeys.length) {
     throw new Error('Supabase server credentials are not configured.')
@@ -1410,7 +1410,7 @@ const routeApi = Object.freeze({
   welcomeCase,
 })
 
-async function handleRequest(request, response, env) {
+export async function handleRequest(request, response, env) {
   const url = new URL(request.url, 'http://localhost')
   if (!url.pathname.startsWith('/api/')) return false
 
@@ -1457,7 +1457,7 @@ async function handleRequest(request, response, env) {
 }
 
 // Cheap, side-effect-free hardening applied to every response (API and static).
-const SECURITY_HEADERS = Object.freeze({
+export const SECURITY_HEADERS = Object.freeze({
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'X-Frame-Options': 'SAMEORIGIN',

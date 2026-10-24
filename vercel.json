@@ -1,0 +1,38 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "X-Frame-Options", "value": "SAMEORIGIN" }
+      ]
+    }
+  ],
+  "rewrites": [
+    { "source": "/rewards", "destination": "/index.html" },
+    { "source": "/welcome", "destination": "/index.html" },
+    { "source": "/market", "destination": "/index.html" },
+    { "source": "/affiliates", "destination": "/index.html" },
+    { "source": "/race", "destination": "/index.html" },
+    { "source": "/cases", "destination": "/index.html" },
+    { "source": "/cases/:slug", "destination": "/index.html" },
+    { "source": "/battles", "destination": "/index.html" },
+    { "source": "/battles/create", "destination": "/index.html" },
+    { "source": "/battles/:id", "destination": "/index.html" },
+    { "source": "/dice", "destination": "/index.html" },
+    { "source": "/blackjack", "destination": "/index.html" },
+    { "source": "/coinflip", "destination": "/index.html" },
+    { "source": "/mines", "destination": "/index.html" },
+    { "source": "/x-roulette", "destination": "/index.html" },
+    { "source": "/upgrader", "destination": "/index.html" },
+    { "source": "/provably-fair", "destination": "/index.html" },
+    { "source": "/terms-of-service", "destination": "/index.html" },
+    { "source": "/privacy-policy", "destination": "/index.html" },
+    { "source": "/r/:user", "destination": "/index.html" }
+  ]
+}
