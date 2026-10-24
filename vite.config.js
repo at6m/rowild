@@ -21,11 +21,13 @@ export default defineConfig(({ mode }) => {
     build: { sourcemap: false },
     plugins: [roriskApi(serverEnv), react()],
     server: {
-      allowedHosts: ['rorisk-v2.onrender.com', 'rowild.lol', 'www.rowild.lol'],
+      // A leading dot allows every subdomain, so any Render service URL works
+      // without editing this file when the service is recreated.
+      allowedHosts: ['.onrender.com', 'rowild.lol', 'www.rowild.lol'],
       host: '0.0.0.0',
     },
     preview: {
-      allowedHosts: ['rorisk-v2.onrender.com', 'rowild.lol', 'www.rowild.lol'],
+      allowedHosts: ['.onrender.com', 'rowild.lol', 'www.rowild.lol'],
       host: '0.0.0.0',
       port: 10000, 
       strictPort: true, 
