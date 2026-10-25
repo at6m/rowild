@@ -41,7 +41,7 @@ function WinIcon() {
 }
 
 function MinesHeader({ onFairness }) {
-  return <div className="mines-header" {...headerScope}><div className="mines-header-left" {...headerScope}><SiteIcon name="mines" {...headerScope} /> Mines</div><div className="mines-header-center" {...headerScope}><img src={image('logo.ee8858f3.png')} alt="logo" {...headerScope} /></div><div className="mines-header-right" role="button" tabIndex="0" onClick={onFairness} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onFairness() }} {...headerScope}><SiteIcon name="fairness" {...headerScope} /> Fairness</div></div>
+  return <div className="mines-header" {...headerScope}><div className="mines-header-left" {...headerScope}><SiteIcon name="mines" {...headerScope} /> Mines</div><div className="mines-header-center" {...headerScope}><img src="/assets/images/mines-header.png" alt="logo" {...headerScope} /></div><div className="mines-header-right" role="button" tabIndex="0" onClick={onFairness} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onFairness() }} {...headerScope}><SiteIcon name="fairness" {...headerScope} /> Fairness</div></div>
 }
 
 function MinesControls({ amount, setAmount, mines, setMines, currency, balance, game, loadingAction, revealBusy, onStart, onCashout, onAutoSelect, onFairness }) {
