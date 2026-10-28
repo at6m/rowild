@@ -1,5 +1,6 @@
-import { handleRequest, SECURITY_HEADERS, supabaseRequest } from '../server/index.js'
+import { handleRequest, SECURITY_HEADERS, routeApi, supabaseRequest } from '../server/index.js'
 import { startSimulatedBets } from '../server/liveBets.js'
+import { startBotAttendance } from '../server/botPlayers.js'
 
 /**
  * The one function every /api route lands on.
@@ -16,7 +17,10 @@ let bootstrapped = false
 function bootstrap() {
   if (bootstrapped) return
   bootstrapped = true
-  if (env.SUPABASE_URL) startSimulatedBets(env, supabaseRequest)
+  if (env.SUPABASE_URL) {
+    startSimulatedBets(env, supabaseRequest)
+    startBotAttendance(env, supabaseRequest, routeApi)
+  }
 }
 
 function restoreApiUrl(rawUrl) {

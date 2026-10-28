@@ -23,7 +23,8 @@ export const ATTENDANCE_PLAYERS = [
 
 const DEFAULT_AVATAR = '/assets/users/default-avatar.png'
 const MIN_WAIT_MS = 8000
-const MAX_WAIT_MS = 35000
+// Kept a little under 35s so the tick and the join request still land inside it.
+const MAX_WAIT_MS = 32000
 const TICK_MS = 2000
 const SWEEP_MS = 60 * 1000
 const RETRY_MS = 20 * 1000

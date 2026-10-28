@@ -1354,7 +1354,7 @@ function chooseWelcomeOutcome(caseData) {
   return demoCaseOutcomes(caseData, 1)[0]
 }
 
-const routeApi = Object.freeze({
+export const routeApi = Object.freeze({
   COINS_PER_USD,
   COINFLIP_GAME_SELECT,
   affiliateReferrer,
