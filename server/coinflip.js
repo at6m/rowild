@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { scheduleBotAttendance } from './botPlayers.js'
 
 export async function handleCoinflipRequest({ request, response, url, env, api }) {
   const { sendJson, readJson, startRealtimeSession, supabaseRequest, requestSessionUser, publicCoinflipGame, latestEosBlock, coinflipGameByUuid, broadcastRealtime, COINFLIP_GAME_SELECT } = api
@@ -57,6 +58,8 @@ export async function handleCoinflipRequest({ request, response, url, env, api }
       if (result?.user) startRealtimeSession(request, response, env, result.user)
       const game = publicCoinflipGame(await coinflipGameByUuid(env, result.game.uuid))
       broadcastRealtime({ type: 'coinflip', game })
+      // An open game is picked up by one of the regulars after a short wait.
+      scheduleBotAttendance('coinflip', game.uuid)
       sendJson(response, 200, { ...result, game })
       return true
     }

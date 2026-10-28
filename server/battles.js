@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { scheduleBotAttendance } from './botPlayers.js'
 
 const BATTLE_SELECT = '*'
 const BOT_PROFILES = [
@@ -51,7 +52,7 @@ function teamFor(mode, slot) {
   return slot
 }
 
-function publicBattle(row) {
+export function publicBattle(row) {
   const cases = [...(row.cases || [])].map((entry, index) => ({
     ...entry,
     round_index: Number(entry.round_index ?? entry.roundIndex ?? index),
@@ -513,6 +514,8 @@ export async function handleBattlesRequest(context) {
     const row = result?.battle || await battleRow(supabaseRequest, env, result.battle.uuid)
     const game = publicBattle(row)
     broadcastRealtime({ type: 'battleUpdate', game })
+    // An open lobby quietly picks up one of the regulars after a short wait.
+    scheduleBotAttendance('battle', row.uuid)
     sendJson(response, 200, { game, user: result.user })
     return true
   }

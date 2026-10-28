@@ -21,6 +21,8 @@ const SIM_USERS = [
   ['rira', 34], ['towa', 87], ['tape', 18], ['mentaltwo', 46], ['faithless', 71],
   ['luca2xp', 29], ['limbo', 58], ['kami', 95], ['dripp', 37], ['hidice', 12],
   ['ares', 66], ['shanee', 49], ['BrainW', 82], ['cryyan', 25], ['WFU', 90],
+  ['dzers0n', 44], ['Arak', 57], ['Jester', 31], ['cj8e2', 68], ['champion242701', 25],
+  ['maksioXtreme', 52], ['88tears', 39], ['Beasteakz', 76], ['Nynkei', 20], ['somuchbtc', 61],
 ]
 
 const DEFAULT_AVATAR = '/assets/users/default-avatar.png'
@@ -126,13 +128,13 @@ function fallbackAccounts() {
  * Creates the cast once and caches it. These are ordinary profile rows so the
  * feed shows real levels and avatars; they never sign in and never hold bets.
  */
-async function ensureAccounts(env, supabaseRequest) {
+export async function ensureSimulatedAccounts(env, supabaseRequest) {
   const key = String(env.SUPABASE_URL || '')
   if (accountCache.key === key && Date.now() - accountCache.at < ACCOUNT_TTL_MS && accountCache.accounts.length) return accountCache.accounts
 
   try {
     const names = SIM_USERS.map(([username]) => username)
-    const query = new URLSearchParams({ select: 'uuid,username,level,rank,avatar_headshot', username: `in.(${names.join(',')})` })
+    const query = new URLSearchParams({ select: 'uuid,username,level,rank,avatar_headshot,coins,rocoins', username: `in.(${names.join(',')})` })
     const existing = await supabaseRequest(env, `/rest/v1/rorisk_users?${query}`)
     const rows = Array.isArray(existing) ? existing : []
     const found = new Set(rows.map((row) => row.username))
@@ -161,6 +163,8 @@ async function ensureAccounts(env, supabaseRequest) {
       avatar_headshot: row.avatar_headshot || DEFAULT_AVATAR,
       level: Number(row.level) || 0,
       rank: row.rank || 'user',
+      coins: Number(row.coins) || 0,
+      rocoins: Number(row.rocoins) || 0,
     }))
     if (!accounts.length) return fallbackAccounts()
     accountCache = { key, at: Date.now(), accounts }
@@ -224,7 +228,7 @@ export function startSimulatedBets(env, supabaseRequest) {
 
   const tick = async () => {
     try {
-      const accounts = await ensureAccounts(env, supabaseRequest)
+      const accounts = await ensureSimulatedAccounts(env, supabaseRequest)
       const cases = await loadCases(env, supabaseRequest)
       remember(generateSimulatedBet({ accounts, cases }))
     } catch (error) {
@@ -245,7 +249,7 @@ export function startSimulatedBets(env, supabaseRequest) {
 
   void (async () => {
     try {
-      const accounts = await ensureAccounts(env, supabaseRequest)
+      const accounts = await ensureSimulatedAccounts(env, supabaseRequest)
       const cases = await loadCases(env, supabaseRequest)
       let offset = randomInt(6, 20) * 1000
       for (let index = 0; index < BACKLOG_MIN; index += 1) {

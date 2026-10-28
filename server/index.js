@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 
 import http from 'node:http'
 import https from 'node:https'
 import { attachRealtimeServer, broadcastRealtime, clearRealtimeSessionCookie, createRealtimeSession, readRealtimeSession, setRealtimeSessionCookie } from './chat.js'
-import { handleBattlesRequest } from './battles.js'
+import { handleBattlesRequest, publicBattle } from './battles.js'
 import { handleAffiliatesRequest } from './affiliates.js'
 import { handleAssetsRequest } from './assets.js'
 import { handleAuthRequest } from './auth.js'
@@ -11,6 +11,7 @@ import { handleCasesRequest } from './cases.js'
 import { handleCoinflipRequest } from './coinflip.js'
 import { handleDiceRequest } from './dice.js'
 import { startSimulatedBets } from './liveBets.js'
+import { startBotAttendance } from './botPlayers.js'
 import { handleMinesRequest } from './mines.js'
 import { handlePaymentsRequest } from './payments.js'
 import { handlePromosRequest } from './promos.js'
@@ -1380,6 +1381,7 @@ const routeApi = Object.freeze({
   normalizeVerificationText,
   primeLimitedImages,
   publicAffiliate,
+  publicBattle,
   publicBlackjackGame,
   publicCase,
   publicCoinflipGame,
@@ -1476,11 +1478,13 @@ export function roriskApi(env) {
       server.middlewares.use(middleware)
       attachRealtimeServer(server.httpServer, env.RORISK_USER_SECRET ? (value) => hmac(value, env.RORISK_USER_SECRET) : null, env)
       startSimulatedBets(env, supabaseRequest)
+      startBotAttendance(env, supabaseRequest, routeApi)
     },
     configurePreviewServer(server) {
       server.middlewares.use(middleware)
       attachRealtimeServer(server.httpServer, env.RORISK_USER_SECRET ? (value) => hmac(value, env.RORISK_USER_SECRET) : null, env)
       startSimulatedBets(env, supabaseRequest)
+      startBotAttendance(env, supabaseRequest, routeApi)
     },
   }
 }
