@@ -28,8 +28,9 @@ function randomMemberCount() {
   return MEMBER_COUNT_MIN + Math.floor(Math.random() * (MEMBER_COUNT_MAX - MEMBER_COUNT_MIN + 1))
 }
 
-// Simulated live member count: starts anywhere in 2-12 and drifts by one or two every
-// two minutes, so 3 becomes 5 or 4 rather than jumping straight to 12.
+// Simulated baseline for the live member count: starts anywhere in 2-12 and drifts by one
+// or two every two minutes, so 3 becomes 5 or 4 rather than jumping straight to 12. Any
+// genuinely connected sockets are added on top of this baseline.
 function useSimulatedMemberCount() {
   const [count, setCount] = useState(randomMemberCount)
   useEffect(() => {
@@ -232,7 +233,8 @@ function Chat({ onToggle, user }) {
   const { close: closeRainJoin, isRendered: isRainJoinRendered, menuClass: rainJoinClass, open: openRainJoin } = usePopupTransition(200)
   const [chatMessage, setChatMessage] = useState('')
   const [messages, setMessages] = useState([])
-  const onlineCount = useSimulatedMemberCount()
+  const [onlineByRoom, setOnlineByRoom] = useState({ en: 0, tr: 0, es: 0, ru: 0, de: 0 })
+  const memberBaseline = useSimulatedMemberCount()
   const [rain, setRain] = useState(null)
   const [showRainTip, setShowRainTip] = useState(false)
   const [serverOffset, setServerOffset] = useState(0)
@@ -274,6 +276,7 @@ function Chat({ onToggle, user }) {
         let payload
         try { payload = JSON.parse(event.data) } catch { return }
         if (payload.type === 'history' && payload.room === languageCodeRef.current) setMessages(Array.isArray(payload.messages) ? payload.messages : [])
+        if (payload.type === 'presence' && payload.counts) setOnlineByRoom(payload.counts)
         if (payload.type === 'message' && payload.message?.room === languageCodeRef.current) setMessages((current) => [...current.filter((item) => item.id !== payload.message.id), payload.message].slice(-50))
         if (payload.type === 'rain' && payload.rain) {
           setRain(payload.rain)
@@ -466,7 +469,7 @@ function Chat({ onToggle, user }) {
                     <img className="language-flag" src={language.flag} alt="" {...scope} />
                     <span className="language-code" {...scope}>{language.code.toUpperCase()}</span>
                     <span className="language-online-dot" {...scope} />
-                    <span className="language-online-count" {...scope}>{onlineCount}</span>
+                    <span className="language-online-count" {...scope}>{memberBaseline + (onlineByRoom[language.code] || 0)}</span>
                     <SiteIcon name="chevron-down" className={`language-chevron${isLanguageExpanded ? ' language-chevron-open' : ''}`} {...scope} />
                   </button>
                   {isLanguageRendered && <div className={`language-menu ${languageMenuClass('language-menu')}`.trim()} {...scope}>{languages.map((item) => <button key={item.code} className={item.code === language.code ? 'language-active' : ''} type="button" onClick={() => switchLanguage(item)} {...scope}><img src={item.flag} alt="" {...scope} /><span {...scope}>{item.label}</span></button>)}</div>}
