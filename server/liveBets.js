@@ -27,7 +27,8 @@ const SIM_USERS = [
 
 const DEFAULT_AVATAR = '/assets/users/default-avatar.png'
 const TIMER_KEY = Symbol.for('rorisk.simulatedBets.timer')
-const ACCOUNT_TTL_MS = 10 * 60 * 1000
+// Short on purpose: an edited profile picture or level shows up within a minute.
+const ACCOUNT_TTL_MS = 60 * 1000
 const CASE_TTL_MS = 10 * 60 * 1000
 const STORE_LIMIT = 200
 const BACKLOG_MIN = 18
@@ -125,6 +126,20 @@ function fallbackAccounts() {
 }
 
 /**
+ * Rewrites the avatar on bets already sitting in the feed, so a newly uploaded
+ * picture appears immediately instead of only on bets placed after the change.
+ */
+function refreshStoredAvatars(accounts) {
+  const byName = new Map(accounts.filter((account) => account.avatar_headshot).map((account) => [account.username, account]))
+  for (const bet of store) {
+    const account = byName.get(bet.username)
+    if (!account) continue
+    if (account.avatar_headshot !== bet.avatar_headshot) bet.avatar_headshot = account.avatar_headshot
+    if (account.level && account.level !== bet.level) bet.level = account.level
+  }
+}
+
+/**
  * Creates the cast once and caches it. These are ordinary profile rows so the
  * feed shows real levels and avatars; they never sign in and never hold bets.
  */
@@ -168,6 +183,7 @@ export async function ensureSimulatedAccounts(env, supabaseRequest) {
     }))
     if (!accounts.length) return fallbackAccounts()
     accountCache = { key, at: Date.now(), accounts }
+    refreshStoredAvatars(accounts)
     return accounts
   } catch (error) {
     console.warn('[live-bets] account lookup failed:', error instanceof Error ? error.message : error)

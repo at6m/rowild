@@ -81,12 +81,16 @@ async function attendBattle({ env, supabaseRequest, api, entry }) {
   const username = availableName(row)
   if (!slots.length || !username) return 'done'
 
+  // Seat the player's real profile picture, not a placeholder.
+  const accounts = await ensureSimulatedAccounts(env, supabaseRequest)
+  const avatar = accounts.find((account) => account.username === username)?.avatar_headshot || DEFAULT_AVATAR
+
   await supabaseRequest(env, '/rest/v1/rpc/add_rorisk_battle_bots', {
     method: 'POST',
     body: JSON.stringify({
       p_battle_uuid: row.uuid,
       p_creator_uuid: row.creator_uuid,
-      p_bots: [{ slot: slots[0], username, avatar: DEFAULT_AVATAR }],
+      p_bots: [{ slot: slots[0], username, avatar }],
     }),
   })
 
