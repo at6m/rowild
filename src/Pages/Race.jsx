@@ -159,7 +159,8 @@ function Race({ user, onSignIn }) {
   }
 
   const race = state?.race
-  const leaderboard = Array.isArray(state?.leaderboard) ? state.leaderboard : []
+  // The board shows ten places in total: three podium cards plus seven rows.
+  const leaderboard = (Array.isArray(state?.leaderboard) ? state.leaderboard : []).slice(0, 10)
   const pool = Number(race?.prizePool) || 500000
   const byPlace = (place) => leaderboard[place - 1]
   const me = state?.me
