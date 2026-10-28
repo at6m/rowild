@@ -5,6 +5,9 @@ import { createRainService } from './rain.js'
 const REALTIME_PATH = '/api/realtime'
 const ROOMS = new Set(['en', 'tr', 'es', 'ru', 'de'])
 const MAX_MESSAGE_LENGTH = 300
+// Chat is visible and rain stays playable, but messages are rejected until this is enabled.
+// The client hides the composer behind the matching flag in src/components/Chat.jsx.
+const CHAT_MESSAGING_ENABLED = false
 const HISTORY_LIMIT = 50
 const SERVER_KEY = Symbol.for('rorisk.realtime.server')
 let sendRealtimeEvent = null
@@ -268,6 +271,10 @@ export function attachRealtimeServer(httpServer, signValue, env = {}) {
       }
 
       if (event.type === 'message') {
+        if (!CHAT_MESSAGING_ENABLED) {
+          safeSend(socket, { type: 'error', message: "Chat will open soon. You can still join and tip the rain in the meantime." })
+          return
+        }
         if (!socket.user) {
           safeSend(socket, { type: 'error', message: 'Please sign in to perform this action.' })
           return

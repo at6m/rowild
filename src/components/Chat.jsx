@@ -17,6 +17,34 @@ const languages = [
   { code: 'de', label: 'German', flag: '/assets/chat/de.d28c9dc5.svg' },
 ]
 
+// Chat stays visible and rain stays playable, but nobody can write until this is flipped.
+// The server enforces the same rule (see CHAT_MESSAGING_ENABLED in server/chat.js).
+const CHAT_MESSAGING_ENABLED = false
+const MEMBER_COUNT_MIN = 2
+const MEMBER_COUNT_MAX = 12
+const MEMBER_COUNT_INTERVAL = 2 * 60 * 1000
+
+function randomMemberCount() {
+  return MEMBER_COUNT_MIN + Math.floor(Math.random() * (MEMBER_COUNT_MAX - MEMBER_COUNT_MIN + 1))
+}
+
+// Simulated live member count: starts anywhere in 2-12 and drifts by one or two every
+// two minutes, so 3 becomes 5 or 4 rather than jumping straight to 12.
+function useSimulatedMemberCount() {
+  const [count, setCount] = useState(randomMemberCount)
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setCount((current) => {
+        const step = 1 + Math.floor(Math.random() * 2)
+        const next = current + (Math.random() < 0.5 ? -step : step)
+        return Math.min(MEMBER_COUNT_MAX, Math.max(MEMBER_COUNT_MIN, next))
+      })
+    }, MEMBER_COUNT_INTERVAL)
+    return () => window.clearInterval(timer)
+  }, [])
+  return count
+}
+
 function usePopupTransition(duration = 150) {
   const [phase, setPhase] = useState('closed')
   const phaseRef = useRef('closed')
@@ -204,7 +232,7 @@ function Chat({ onToggle, user }) {
   const { close: closeRainJoin, isRendered: isRainJoinRendered, menuClass: rainJoinClass, open: openRainJoin } = usePopupTransition(200)
   const [chatMessage, setChatMessage] = useState('')
   const [messages, setMessages] = useState([])
-  const [onlineByRoom, setOnlineByRoom] = useState({ en: 0, tr: 0, es: 0, ru: 0, de: 0 })
+  const onlineCount = useSimulatedMemberCount()
   const [rain, setRain] = useState(null)
   const [showRainTip, setShowRainTip] = useState(false)
   const [serverOffset, setServerOffset] = useState(0)
@@ -245,7 +273,6 @@ function Chat({ onToggle, user }) {
       socket.addEventListener('message', (event) => {
         let payload
         try { payload = JSON.parse(event.data) } catch { return }
-        if (payload.type === 'presence' && payload.counts) setOnlineByRoom(payload.counts)
         if (payload.type === 'history' && payload.room === languageCodeRef.current) setMessages(Array.isArray(payload.messages) ? payload.messages : [])
         if (payload.type === 'message' && payload.message?.room === languageCodeRef.current) setMessages((current) => [...current.filter((item) => item.id !== payload.message.id), payload.message].slice(-50))
         if (payload.type === 'rain' && payload.rain) {
@@ -332,6 +359,7 @@ function Chat({ onToggle, user }) {
   }, [closeEmojiPopup, closeLanguagePopup, isChatOpen, isEmojiExpanded, isLanguageExpanded])
 
   const submitMessage = () => {
+    if (!CHAT_MESSAGING_ENABLED) return notify({ type: 'error', message: "Chat will open soon. You can still join and tip the rain in the meantime." })
     if (!user) return notify({ type: 'error', message: 'Please sign in to perform this action.' })
     const text = chatMessage.trim()
     if (!text) return notify({ type: 'error', message: 'Please enter a message.' })
@@ -413,14 +441,15 @@ function Chat({ onToggle, user }) {
         {isRainJoinRendered && <div className={`content-rain ${rainJoinClass('fade')}`.trim()} {...scope}><RainJoin amount={rainAmount} timer={rainTimer} joined={joinedRain} participantsCount={rain?.participantsCount || rain?.entries?.length || 0} onJoin={joinRain} /></div>}
         <div className="chat-footer" {...scope}>
           <div className="footer-input-wrapper" {...scope}>
+            {!CHAT_MESSAGING_ENABLED && <div className="chat-locked-notice" style={{ padding: '0 15px 10px', textAlign: 'center', fontSize: '12px', fontWeight: 600, color: '#9ba7b3', lineHeight: 1.4 }}>Chat is closed — it will open soon. Rain is still live!</div>}
             <div ref={emojiRef} className={`footer-input${isEmojiExpanded ? ' footer-input-emoji-open' : ''}`} {...scope}>
-              <input ref={inputRef} type="text" placeholder="Write a message..." value={chatMessage} onChange={(event) => setChatMessage(event.target.value)} onKeyUp={(event) => event.key === 'Enter' && submitMessage()} {...scope} />
+              <input ref={inputRef} type="text" placeholder={CHAT_MESSAGING_ENABLED ? 'Write a message...' : 'Chat will open soon...'} value={chatMessage} readOnly={!CHAT_MESSAGING_ENABLED} disabled={!CHAT_MESSAGING_ENABLED} onChange={(event) => setChatMessage(event.target.value)} onKeyUp={(event) => event.key === 'Enter' && submitMessage()} {...scope} />
               <div className="emoji-selector" {...scope}>
                 <button className="button-emoji" type="button" aria-expanded={isEmojiExpanded} aria-label="Emojis" title="Emojis" onClick={(event) => { event.stopPropagation(); toggleEmojiPopup(); closeLanguagePopup() }} {...scope}>
                   <img src={emojiButton.src} alt={emojiButton.code} {...scope} />
                 </button>
               </div>
-              <button className="button-send" type="button" aria-label="Send message" onClick={submitMessage} {...scope}>
+              <button className="button-send" type="button" aria-label="Send message" title={CHAT_MESSAGING_ENABLED ? undefined : 'Chat will open soon'} disabled={!CHAT_MESSAGING_ENABLED} onClick={submitMessage} {...scope}>
                 <svg viewBox="0 0 24 24" aria-hidden="true" {...scope}><path d="M3.4 20.4 21.85 12 3.4 3.6l-.01 6.53L16.6 12 3.39 13.87l.01 6.53Z" {...scope} /></svg>
               </button>
               {isEmojiRendered && <div className={`emoji-menu ${emojiMenuClass('emoji-menu')}`.trim()} {...scope}>{chatEmojis.map((emoji) => <button className="emoji-menu-item" type="button" title={`:${emoji.code}:`} onClick={() => addEmoji(emoji.code)} key={emoji.code} {...scope}><img src={emoji.src} alt={emoji.code} loading="lazy" {...scope} /></button>)}</div>}
@@ -437,7 +466,7 @@ function Chat({ onToggle, user }) {
                     <img className="language-flag" src={language.flag} alt="" {...scope} />
                     <span className="language-code" {...scope}>{language.code.toUpperCase()}</span>
                     <span className="language-online-dot" {...scope} />
-                    <span className="language-online-count" {...scope}>{onlineByRoom[language.code] || 0}</span>
+                    <span className="language-online-count" {...scope}>{onlineCount}</span>
                     <SiteIcon name="chevron-down" className={`language-chevron${isLanguageExpanded ? ' language-chevron-open' : ''}`} {...scope} />
                   </button>
                   {isLanguageRendered && <div className={`language-menu ${languageMenuClass('language-menu')}`.trim()} {...scope}>{languages.map((item) => <button key={item.code} className={item.code === language.code ? 'language-active' : ''} type="button" onClick={() => switchLanguage(item)} {...scope}><img src={item.flag} alt="" {...scope} /><span {...scope}>{item.label}</span></button>)}</div>}
