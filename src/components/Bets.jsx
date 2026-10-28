@@ -2,6 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import SiteIcon from './Icons'
 
 const scope = { 'data-v-3dfc5cda': '' }
+// The feed keeps a wider pool so the High Rollers / Lucky Wins tabs stay
+// populated, but the panel itself never renders more than this many rows.
+const VISIBLE_BETS = 15
 const amount = (value) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value) || 0)
 const levelTheme = (level) => level >= 100 ? 'red' : level >= 75 ? 'orange' : level >= 50 ? 'purple' : level >= 25 ? 'green' : 'blue'
 
@@ -25,7 +28,7 @@ function Bets({ games }) {
   const animationFrames = useRef(new Set())
   const animationTimers = useRef(new Set())
   const sourceGames = games ?? remoteGames
-  const visible = sourceGames.filter((game) => tab === 'big-wins' ? Number(game.bet_amount) >= 100000 : tab === 'lucky-wins' ? Number(game.multiplier) >= 5 && game.won : true)
+  const visible = sourceGames.filter((game) => tab === 'big-wins' ? Number(game.bet_amount) >= 100000 : tab === 'lucky-wins' ? Number(game.multiplier) >= 5 && game.won : true).slice(0, VISIBLE_BETS)
   const visibleIds = visible.map((game) => game.uuid)
   const visibleSignature = visibleIds.join('|')
 
