@@ -204,6 +204,7 @@ function Admin({ user, onSignIn }) {
   const [saving, setSaving] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [online, setOnline] = useState([])
+  const [presenceReady, setPresenceReady] = useState(true)
   const [deltas, setDeltas] = useState({})
   const [reloadKey, setReloadKey] = useState(0)
   const previousBalances = useRef(new Map())
@@ -227,6 +228,7 @@ function Admin({ user, onSignIn }) {
         const payload = await adminFetch(`/api/admin/overview?${params.toString()}`, { signal: controller.signal })
         if (cancelled) return
         setOverview(payload)
+        setPresenceReady(payload.presenceReady !== false)
         setStatus('ready')
         setFailure(null)
       } catch (error) {
@@ -251,6 +253,7 @@ function Admin({ user, onSignIn }) {
       try {
         const payload = await adminFetch('/api/admin/live')
         if (disposed) return
+        setPresenceReady(payload.presenceReady !== false)
         setOnline(payload.players || [])
         setDeltas((current) => {
           const next = { ...current }
@@ -448,6 +451,13 @@ function Admin({ user, onSignIn }) {
         </div>
       )}
 
+      {overview && overview.presenceReady === false && (
+        <div className="admin-banner warning">
+          <strong>Live presence is not installed yet.</strong>
+          <span>Run <code>npx supabase db push --include-all</code> to add <code>rorisk_presence</code>; until then the online list can only show players connected to this server instance.</span>
+        </div>
+      )}
+
       <section className="admin-stats">
         <article className="admin-stat">
           <span>Players</span>
@@ -480,7 +490,9 @@ function Admin({ user, onSignIn }) {
           <span className="admin-panel-tag">{liveRows.length} live</span>
         </div>
         {liveRows.length === 0 ? (
-          <div className="admin-empty">Nobody is connected right now.</div>
+          <div className="admin-empty">
+            {presenceReady ? 'Nobody is connected right now.' : 'Presence tracking is not installed yet, so online players cannot be listed.'}
+          </div>
         ) : (
           <div className="admin-live-grid">
             {liveRows.map((player) => (

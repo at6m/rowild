@@ -87,10 +87,11 @@ async function readPresence(env) {
   const since = new Date(Date.now() - ONLINE_WINDOW_MS).toISOString()
   try {
     const { data } = await query(env, `/rest/v1/rorisk_presence?select=user_uuid,last_seen_at&last_seen_at=gte.${encodeURIComponent(since)}&order=last_seen_at.desc&limit=500`)
-    return Array.isArray(data) ? data : []
+    return { rows: Array.isArray(data) ? data : [], ready: true }
   } catch {
-    // Presence is optional: without the table we still know who holds a socket.
-    return []
+    // Presence is optional, but the dashboard must not claim "nobody online" when
+    // the reason is a missing table rather than an empty site.
+    return { rows: [], ready: false }
   }
 }
 
@@ -127,13 +128,13 @@ async function overview(context) {
     playersPath += `&or=(username.ilike.${term},email.ilike.${term})`
   }
 
-  const [playersResult, rtp, presence] = await Promise.all([
+  const [playersResult, rtp, presenceResult] = await Promise.all([
     query(env, playersPath, { prefer: 'count=exact' }),
     readRtp(env),
     readPresence(env),
   ])
 
-  const online = onlineUserIds(presence)
+  const online = onlineUserIds(presenceResult.rows)
   const grouped = groupSettings(rtp.settings)
   const total = playersResult.total ?? (playersResult.data?.length || 0)
   const totalPages = Math.max(1, Math.ceil(total / limit))
@@ -151,6 +152,7 @@ async function overview(context) {
     players,
     defaults: rtp.defaults,
     rtpReady: rtp.ready,
+    presenceReady: presenceResult.ready,
     pagination: {
       page,
       limit,
@@ -175,11 +177,11 @@ async function live(context) {
   const { env, api, response } = context
   await requireAdmin(context)
   const presence = await readPresence(env)
-  const seenAt = new Map(presence.map((row) => [row.user_uuid, row.last_seen_at]))
+  const seenAt = new Map(presence.rows.map((row) => [row.user_uuid, row.last_seen_at]))
   const registry = new Map(getRealtimeOnlineUsers().map((player) => [player.uuid, player]))
-  const ids = onlineUserIds(presence)
+  const ids = onlineUserIds(presence.rows)
   if (ids.size === 0) {
-    api.sendJson(response, 200, { players: [], serverTime: Date.now() })
+    api.sendJson(response, 200, { players: [], presenceReady: presence.ready, serverTime: Date.now() })
     return
   }
 
@@ -196,7 +198,7 @@ async function live(context) {
   }))
   players.sort((left, right) => String(right.lastSeenAt || '').localeCompare(String(left.lastSeenAt || '')))
 
-  api.sendJson(response, 200, { players, serverTime: Date.now() })
+  api.sendJson(response, 200, { players, presenceReady: presence.ready, serverTime: Date.now() })
 }
 
 function parseRtpEntries(body) {
