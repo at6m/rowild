@@ -85,5 +85,33 @@ battles read it at settlement.
 npx supabase db push --include-all
 ```
 
-Or paste `supabase/migrations/20261105000000_create_rorisk_rtp.sql` into the Supabase
-SQL editor.
+Or paste the two migrations (`20261105000000_create_rorisk_rtp.sql` and
+`20261105010000_create_rorisk_presence.sql`) into the Supabase SQL editor.
+
+## Admin dashboard
+
+Open `/admin`, or use **Admin** in the profile menu and the sidebar (both only appear
+for admins). The dashboard shows:
+
+- every player with their effective RTP (the `all` rate plus any per-game overrides),
+  their Coins and RoCoins, and when they joined;
+- who is online right now and their balances, refreshed every 2.5 seconds with green
+  and red badges showing movement since the previous refresh;
+- an RTP editor per player: set `all` for every game at once, or one game at a time,
+  with quick presets and a **Default** action that removes the override.
+
+Only accounts whose `rorisk_users.rank` is `admin` can call the API; every request
+re-reads the rank from the database, so demoting someone closes the dashboard on their
+next action. Promote an account with:
+
+```sql
+update public.rorisk_users set rank = 'admin' where username = 'your_username';
+```
+
+Online status comes from `public.rorisk_presence`, which the server's session endpoint
+touches at most once every 20 seconds per player; a player counts as online for one
+minute after their last touch. If that table is missing the dashboard still works and
+falls back to the players holding a live chat socket.
+
+If the RTP tables have not been applied yet, the dashboard shows a banner and keeps the
+player list and balances available.

@@ -5,7 +5,9 @@ import { attachRealtimeServer, broadcastRealtime, clearRealtimeSessionCookie, cr
 import { handleBattlesRequest, publicBattle } from './battles.js'
 import { handleAffiliatesRequest } from './affiliates.js'
 import { handleAssetsRequest } from './assets.js'
+import { handleAdminRequest } from './admin.js'
 import { handleAuthRequest } from './auth.js'
+import { touchPresence } from './presence.js'
 import { handleBlackjackRequest } from './blackjack.js'
 import { handleCasesRequest } from './cases.js'
 import { handleCoinflipRequest } from './coinflip.js'
@@ -1405,6 +1407,7 @@ export const routeApi = Object.freeze({
   startRealtimeSession,
   supabaseAuthRequest,
   supabaseRequest,
+  touchPresence: (env, user) => touchPresence(env, supabaseRequest, user),
   syncRouletteRound,
   upsertProfile,
   verifyCaptcha,
@@ -1422,6 +1425,7 @@ export async function handleRequest(request, response, env) {
     }
     const routeContext = { request, response, url, env, api: routeApi }
     const routeHandlers = [
+      handleAdminRequest,
       handleAffiliatesRequest,
       handleRaceRequest,
       handlePromosRequest,

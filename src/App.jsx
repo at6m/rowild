@@ -34,6 +34,7 @@ const pageLoaders = {
   provablyFair: () => import('./Pages/ProvablyFair'),
   terms: () => import('./Pages/Terms'),
   privacy: () => import('./Pages/Privacy'),
+  admin: () => import('./Pages/Admin'),
 }
 
 const pageComponents = {
@@ -55,6 +56,7 @@ const pageComponents = {
   '/provably-fair': lazy(pageLoaders.provablyFair),
   '/terms-of-service': lazy(pageLoaders.terms),
   '/privacy-policy': lazy(pageLoaders.privacy),
+  '/admin': lazy(pageLoaders.admin),
 }
 
 const routeLoaders = {
@@ -76,6 +78,7 @@ const routeLoaders = {
   '/provably-fair': pageLoaders.provablyFair,
   '/terms-of-service': pageLoaders.terms,
   '/privacy-policy': pageLoaders.privacy,
+  '/admin': pageLoaders.admin,
 }
 
 const CaseOpen = lazy(pageLoaders.caseOpen)
@@ -309,7 +312,7 @@ function App() {
       if (!anchor || anchor.target || anchor.hasAttribute('download')) return
 
       const url = new URL(anchor.href, window.location.href)
-      if (url.origin !== window.location.origin || !(/^\/cases\/[a-zA-Z0-9_-]+$/.test(url.pathname) || /^\/battles\/[a-zA-Z0-9-]+$/.test(url.pathname) || /^\/r\/[A-Za-z0-9_]{3,12}$/.test(url.pathname) || ['/', '/rewards', '/welcome', '/market', '/affiliates', '/race', '/cases', '/battles', '/battles/create', '/dice', '/blackjack', '/coinflip', '/mines', '/x-roulette', '/upgrader', '/provably-fair', '/terms-of-service', '/privacy-policy'].includes(url.pathname))) return
+      if (url.origin !== window.location.origin || !(/^\/cases\/[a-zA-Z0-9_-]+$/.test(url.pathname) || /^\/battles\/[a-zA-Z0-9-]+$/.test(url.pathname) || /^\/r\/[A-Za-z0-9_]{3,12}$/.test(url.pathname) || ['/', '/rewards', '/welcome', '/market', '/affiliates', '/race', '/cases', '/battles', '/battles/create', '/dice', '/blackjack', '/coinflip', '/mines', '/x-roulette', '/upgrader', '/provably-fair', '/terms-of-service', '/privacy-policy', '/admin'].includes(url.pathname))) return
 
       event.preventDefault()
       const referralMatch = url.pathname.match(/^\/r\/([A-Za-z0-9_]{3,12})$/)

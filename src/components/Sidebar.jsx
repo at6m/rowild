@@ -189,7 +189,7 @@ function Sidebar({ pathname, user, onOpenWallet, onOpenSettings }) {
           '/vault': () => onOpenWallet?.('vault'),
           '/settings': () => onOpenSettings?.(),
         }} />}
-        <SidebarSection title="More" items={more} showLabels={showLabels} pathname={pathname} />
+        <SidebarSection title="More" items={user?.rank === 'admin' ? [...more, ['settings', 'Admin', '/admin']] : more} showLabels={showLabels} pathname={pathname} />
       </div>
     </aside>
   )

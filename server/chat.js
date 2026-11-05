@@ -16,6 +16,15 @@ export function broadcastRealtime(payload) {
   sendRealtimeEvent?.(payload)
 }
 
+let listOnlineUsers = null
+
+// Players that currently hold a chat socket, de-duplicated per account. The admin
+// dashboard merges this with the persisted presence table; it is the only source
+// that knows about a socket on this particular instance.
+export function getRealtimeOnlineUsers() {
+  return listOnlineUsers?.() || []
+}
+
 function parseCookies(header = '') {
   return Object.fromEntries(header.split(';').map((part) => {
     const separator = part.indexOf('=')
@@ -136,6 +145,26 @@ export function attachRealtimeServer(httpServer, signValue, env = {}) {
 
   const socketServer = new WebSocketServer({ noServer: true })
   const clients = new Set()
+
+  listOnlineUsers = () => {
+    const byUser = new Map()
+    for (const client of clients) {
+      if (client.readyState !== WebSocket.OPEN || !client.user?.uuid) continue
+      const existing = byUser.get(client.user.uuid)
+      if (existing) { existing.sessions += 1; continue }
+      byUser.set(client.user.uuid, {
+        uuid: client.user.uuid,
+        username: client.user.username,
+        avatar: client.user.avatar,
+        rank: client.user.rank,
+        level: client.user.level,
+        room: client.room,
+        sessions: 1,
+        connectedAt: client.connectedAt || null,
+      })
+    }
+    return [...byUser.values()]
+  }
   const history = Object.fromEntries([...ROOMS].map((room) => [room, []]))
 
   const presence = () => {
@@ -225,6 +254,7 @@ export function attachRealtimeServer(httpServer, signValue, env = {}) {
     socket.room = 'en'
     socket.sessionId = randomUUID()
     socket.isAlive = true
+    socket.connectedAt = Date.now()
     clients.add(socket)
 
     socket.on('pong', () => { socket.isAlive = true })

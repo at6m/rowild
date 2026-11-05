@@ -34,6 +34,7 @@
     { "source": "/provably-fair", "destination": "/index.html" },
     { "source": "/terms-of-service", "destination": "/index.html" },
     { "source": "/privacy-policy", "destination": "/index.html" },
+    { "source": "/admin", "destination": "/index.html" },
     { "source": "/r/:user", "destination": "/index.html" }
   ]
 }

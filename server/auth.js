@@ -24,6 +24,7 @@ export async function handleAuthRequest({ request, response, url, env, api }) {
       if (Number(user.coins) !== Number(sessionUser.coins) || Number(user.rocoins) !== Number(sessionUser.rocoins)) {
         startRealtimeSession(request, response, env, user)
       }
+      void api.touchPresence?.(env, user)
       sendJson(response, 200, { user })
       return true
     }
@@ -36,6 +37,7 @@ export async function handleAuthRequest({ request, response, url, env, api }) {
       })
       const user = await completeAuthProfile(env, session.access_token)
       startRealtimeSession(request, response, env, user)
+      void api.touchPresence?.(env, user)
       sendJson(response, 200, { user })
       return true
     }
@@ -57,6 +59,7 @@ export async function handleAuthRequest({ request, response, url, env, api }) {
       })
       const user = await completeAuthProfile(env, session.access_token)
       startRealtimeSession(request, response, env, user)
+      void api.touchPresence?.(env, user)
       sendJson(response, 200, { user })
       return true
     }
@@ -123,6 +126,7 @@ export async function handleAuthRequest({ request, response, url, env, api }) {
         avatar_headshot: avatarHeadshot,
       }, 'roblox_id')
       startRealtimeSession(request, response, env, user)
+      void api.touchPresence?.(env, user)
       sendJson(response, 200, { user })
       return true
     }
@@ -131,6 +135,7 @@ export async function handleAuthRequest({ request, response, url, env, api }) {
       const { accessToken } = await readJson(request)
       const user = await completeAuthProfile(env, accessToken)
       startRealtimeSession(request, response, env, user)
+      void api.touchPresence?.(env, user)
       sendJson(response, 200, { user })
       return true
     }

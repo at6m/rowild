@@ -387,6 +387,9 @@ function NavbarUser({ user, onSignOut, onOpenWallet, onOpenSettings, onOpenStati
           {[['bets', 'Statistics'], ['wallet', 'Transactions'], ['affiliates', 'Affiliates'], ['rewards', 'Redeem'], ['settings', 'Settings']].map(([icon, label]) => (
             <button type="button" key={label} onClick={() => navigate(label === 'Statistics' ? '/statistics' : label === 'Transactions' ? '/transactions' : label === 'Redeem' ? '/wallet' : label === 'Affiliates' ? '/affiliates' : '/settings')} {...userScope}><SiteIcon name={icon} className="user-dropdown-icon" {...userScope} /><span {...userScope}>{label}</span></button>
           ))}
+          {rank === 'admin' && (
+            <button type="button" onClick={() => navigate('/admin')} {...userScope}><SiteIcon name="settings" className="user-dropdown-icon" {...userScope} /><span {...userScope}>Admin</span></button>
+          )}
           <button className="user-dropdown-logout" type="button" onClick={onSignOut} {...userScope}><SiteIcon name="back" className="user-dropdown-icon" {...userScope} /><span {...userScope}>Sign Out</span></button>
         </div>
       )}
