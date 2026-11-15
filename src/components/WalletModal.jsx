@@ -561,9 +561,26 @@ function RobuxWithdraw({ user, onDone }) {
   }, [robux])
 
   const updateCoins = (value) => setCoinsRaw(String(Math.max(minimumCoins, Math.min(availableCoins, Math.floor(value)))))
-  const submitPlaceholder = () => {
-    setApiKeyRaw('')
-    setStep('queued')
+  const [submitting, setSubmitting] = useState(false)
+  const submitWithdrawal = async () => {
+    if (!canContinue || submitting) return
+    try {
+      setSubmitting(true)
+      const response = await fetch('/api/robux/withdraw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coins }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || 'Unable to queue this withdrawal.')
+      if (payload.user) window.dispatchEvent(new CustomEvent('rorisk:user-update', { detail: { user: payload.user } }))
+      setApiKeyRaw('')
+      setStep('queued')
+    } catch (error) {
+      notify({ type: 'error', message: error.message || 'Unable to queue this withdrawal.' })
+    } finally {
+      setSubmitting(false)
+    }
   }
   const button = (label, { className = 'button-withdraw', disabled = false, onClick, type = 'button' } = {}) => (
     <button className={className} type={type} disabled={disabled} onClick={onClick} {...robuxWithdrawScope}><div className="button-inner" {...robuxWithdrawScope}><div className="inner-content" {...robuxWithdrawScope}>{label}</div></div></button>
@@ -600,7 +617,7 @@ function RobuxWithdraw({ user, onDone }) {
           <div className="step-row" {...robuxWithdrawScope}><div className="step-num" {...robuxWithdrawScope}>3</div><div className="step-body" {...robuxWithdrawScope}><div className="step-title" {...robuxWithdrawScope}>Copy the API Key</div><p className="step-text" {...robuxWithdrawScope}>Copy the generated key and paste it below</p></div></div>
         </div>
         <div className="deposit-section" {...robuxWithdrawScope}><div className="tip-input" {...robuxWithdrawScope}><input className="tip-amount-display" type="password" autoComplete="off" placeholder="Paste your Roblox API Key here..." value={apiKeyRaw} onChange={(event) => setApiKeyRaw(event.target.value)} {...robuxWithdrawScope} /></div><p className="session-copy muted" {...robuxWithdrawScope}>Placeholder only: your API key is never sent or stored.</p></div>
-        <div className="session-actions place-actions" {...robuxWithdrawScope}>{button('Back', { className: 'button-secondary', onClick: () => setStep('permissions') })}{button('Save & Continue →', { disabled: apiKeyRaw.trim().length < 20, onClick: submitPlaceholder })}</div>
+        <div className="session-actions place-actions" {...robuxWithdrawScope}>{button('Back', { className: 'button-secondary', onClick: () => setStep('permissions') })}{button(submitting ? 'Queueing…' : 'Save & Continue →', { disabled: apiKeyRaw.trim().length < 20 || submitting, onClick: submitWithdrawal })}</div>
       </div>}
 
       {step === 'queued' && <div className="deposit-step status-step wallet-flow-step" {...robuxWithdrawScope}>

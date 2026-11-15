@@ -4,6 +4,15 @@ const ONLINE_WINDOW_MS = 60 * 1000
 const GAMES = new Set(['all', 'dice', 'mines', 'blackjack', 'coinflip', 'cases', 'upgrader', 'xroulette', 'battles'])
 const PLAYER_FIELDS = 'uuid,username,avatar_headshot,coins,rocoins,rank,level,xp,joined_at'
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const WITHDRAWAL_VIEWS = new Set(['pending', 'completed', 'canceled', 'all'])
+const WITHDRAWAL_FILTERS = {
+  pending: { crypto: 'in.(pending,reserved,creating)', robux: 'eq.pending' },
+  completed: { crypto: 'in.(complete,completed,confirmed,paid)', robux: 'eq.completed' },
+  canceled: { crypto: 'in.(failed,rejected,canceled,cancelled,expired)', robux: 'eq.canceled' },
+}
+const PENDING_CRYPTO = /^(pending|reserved|creating)$/i
+
 function httpError(message, status, code) {
   const error = new Error(message)
   error.status = status
@@ -278,6 +287,204 @@ async function resetRtp(context) {
   api.sendJson(response, 200, { settings: {} })
 }
 
+function cryptoStatus(status) {
+  const value = String(status || '').toLowerCase()
+  if (/^(complete|completed|confirmed|paid)$/.test(value)) return 'completed'
+  if (/^(failed|rejected|canceled|cancelled|expired)$/.test(value)) return 'canceled'
+  return 'pending'
+}
+
+async function countPending(env, table, filter) {
+  try {
+    const { total } = await query(env, `/rest/v1/${table}?select=uuid&status=${filter}&limit=1`, { prefer: 'count=exact' })
+    return total || 0
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Crypto withdrawals live in rorisk_crypto_withdrawals (reserved as 'pending' by
+ * the cashier); Robux ones live in rorisk_robux_withdrawals. Both reserve the
+ * player's balance up front, so completing or canceling here is what settles the
+ * money: canceling runs the refund inside the database function.
+ */
+async function withdrawals(context) {
+  const { env, url, api, response } = context
+  await requireAdmin(context)
+  const requestedStatus = url.searchParams.get('status')
+  const view = WITHDRAWAL_VIEWS.has(requestedStatus) ? requestedStatus : 'pending'
+  const requestedType = url.searchParams.get('type')
+  const type = ['all', 'crypto', 'robux'].includes(requestedType) ? requestedType : 'all'
+  const limit = Math.min(100, Math.max(5, Number(url.searchParams.get('limit')) || 25))
+  const filters = WITHDRAWAL_FILTERS[view]
+  const statusQuery = (kind) => (filters ? `&status=${encodeURIComponent(filters[kind])}` : '')
+  const order = view === 'pending' ? 'asc' : 'desc'
+
+  let crypto = []
+  let cryptoReady = true
+  if (type !== 'robux') {
+    try {
+      const { data } = await query(
+        env,
+        `/rest/v1/rorisk_crypto_withdrawals?select=uuid,user_uuid,coin_amount,usd_amount,crypto_amount,currency,network,address,memo,status,provider_payload,created_at,completed_at${statusQuery('crypto')}&order=created_at.${order}&limit=${limit}`,
+      )
+      crypto = Array.isArray(data) ? data : []
+    } catch (error) {
+      if (!isMissingTable(error)) throw error
+      cryptoReady = false
+    }
+  }
+
+  let robux = []
+  let robuxReady = true
+  if (type !== 'crypto') {
+    try {
+      const { data } = await query(
+        env,
+        `/rest/v1/rorisk_robux_withdrawals?select=uuid,user_uuid,roblox_id,rocoins,robux,robux_after_tax,status,note,created_at,completed_at${statusQuery('robux')}&order=created_at.${order}&limit=${limit}`,
+      )
+      robux = Array.isArray(data) ? data : []
+    } catch (error) {
+      if (!isMissingTable(error)) throw error
+      robuxReady = false
+    }
+  }
+
+  const ids = [...new Set([...crypto, ...robux].map((row) => row.user_uuid).filter(Boolean))]
+  const players = new Map()
+  if (ids.length) {
+    const { data } = await query(env, `/rest/v1/rorisk_users?uuid=in.(${ids.join(',')})&select=uuid,username,avatar_headshot`)
+    for (const player of data || []) players.set(player.uuid, player)
+  }
+  const withPlayer = (row) => {
+    const player = players.get(row.user_uuid)
+    return { username: player?.username || null, avatar: player?.avatar_headshot || null }
+  }
+
+  const items = [
+    ...crypto.map((row) => ({
+      id: row.uuid,
+      kind: 'crypto',
+      status: cryptoStatus(row.status),
+      providerStatus: row.status,
+      ...withPlayer(row),
+      coins: Number(row.coin_amount) || 0,
+      usd: Number(row.usd_amount) || 0,
+      cryptoAmount: Number(row.crypto_amount) || 0,
+      currency: row.currency || '',
+      network: row.network || '',
+      address: row.address || '',
+      memo: row.memo || null,
+      txid: row.provider_payload?.txid || null,
+      createdAt: row.created_at,
+      settledAt: row.completed_at || null,
+    })),
+    ...robux.map((row) => ({
+      id: row.uuid,
+      kind: 'robux',
+      status: ['pending', 'completed', 'canceled'].includes(row.status) ? row.status : 'pending',
+      providerStatus: row.status,
+      ...withPlayer(row),
+      coins: Number(row.rocoins) || 0,
+      robux: Number(row.robux) || 0,
+      robuxAfterTax: Number(row.robux_after_tax) || 0,
+      robloxId: row.roblox_id || null,
+      note: row.note || null,
+      createdAt: row.created_at,
+      settledAt: row.completed_at || null,
+    })),
+  ].sort((left, right) => {
+    const delta = new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
+    return view === 'pending' ? delta : -delta
+  })
+
+  const [cryptoPending, robuxPending] = await Promise.all([
+    countPending(env, 'rorisk_crypto_withdrawals', WITHDRAWAL_FILTERS.pending.crypto),
+    countPending(env, 'rorisk_robux_withdrawals', WITHDRAWAL_FILTERS.pending.robux),
+  ])
+
+  api.sendJson(response, 200, {
+    items,
+    status: view,
+    type,
+    counts: { crypto: cryptoPending, robux: robuxPending, total: cryptoPending + robuxPending },
+    cryptoReady,
+    robuxReady,
+    serverTime: Date.now(),
+  })
+}
+
+function readWithdrawalAction(body) {
+  const id = String(body?.id || '')
+  if (!UUID_RE.test(id)) throw httpError('That withdrawal is not valid.', 400)
+  const action = body?.action === 'completed' ? 'completed' : body?.action === 'canceled' ? 'canceled' : ''
+  if (!action) throw httpError('Choose whether to complete or cancel this withdrawal.', 400)
+  return { id, action }
+}
+
+async function settleCryptoWithdrawal(context) {
+  const { request, env, api, response } = context
+  const admin = await requireAdmin(context)
+  const body = await api.readJson(request)
+  const { id, action } = readWithdrawalAction(body)
+  const txid = String(body?.txid || '').trim().slice(0, 200)
+  const note = String(body?.note || '').trim().slice(0, 300)
+
+  const { data } = await query(env, `/rest/v1/rorisk_crypto_withdrawals?uuid=eq.${id}&select=uuid,status&limit=1`)
+  const row = data?.[0]
+  if (!row) throw httpError('Withdrawal record not found.', 404)
+  if (!PENDING_CRYPTO.test(String(row.status || ''))) throw httpError('That withdrawal is already settled.', 409)
+
+  const result = await query(env, '/rest/v1/rpc/finalize_rorisk_crypto_withdrawal', {
+    method: 'POST',
+    body: {
+      p_uuid: id,
+      p_track_id: action === 'completed' ? txid || null : null,
+      p_status: action === 'completed' ? 'complete' : 'failed',
+      p_payload: {
+        provider: 'nowpayments',
+        manual_payout: true,
+        admin: admin.uuid,
+        ...(action === 'completed' && txid ? { txid } : {}),
+        ...(note ? { note } : {}),
+        settled_at: new Date().toISOString(),
+      },
+    },
+  })
+
+  const withdrawal = result?.data?.withdrawal || null
+  api.sendJson(response, 200, {
+    withdrawal,
+    refunded: action === 'canceled' ? Number(withdrawal?.coin_amount) || 0 : 0,
+  })
+}
+
+async function settleRobuxWithdrawal(context) {
+  const { request, env, api, response } = context
+  await requireAdmin(context)
+  const body = await api.readJson(request)
+  const { id, action } = readWithdrawalAction(body)
+  const note = String(body?.note || '').trim().slice(0, 300)
+
+  try {
+    const result = await query(env, '/rest/v1/rpc/finalize_rorisk_robux_withdrawal', {
+      method: 'POST',
+      body: { p_uuid: id, p_status: action, p_note: note || null },
+    })
+    const withdrawal = result?.data?.withdrawal || null
+    api.sendJson(response, 200, {
+      withdrawal,
+      refunded: action === 'canceled' ? Number(withdrawal?.rocoins) || 0 : 0,
+    })
+  } catch (error) {
+    if (isMissingTable(error)) {
+      throw httpError('The Robux withdrawal queue is not installed yet. Apply the Supabase migration first.', 409, 'WITHDRAWALS_NOT_INSTALLED')
+    }
+    throw error
+  }
+}
+
 export async function handleAdminRequest(context) {
   const { request, url, response, api } = context
   if (!url.pathname.startsWith('/api/admin')) return false
@@ -297,6 +504,18 @@ export async function handleAdminRequest(context) {
     }
     if (url.pathname === '/api/admin/rtp/reset' && request.method === 'POST') {
       await resetRtp(context)
+      return true
+    }
+    if (url.pathname === '/api/admin/withdrawals' && request.method === 'GET') {
+      await withdrawals(context)
+      return true
+    }
+    if (url.pathname === '/api/admin/withdrawals/crypto' && request.method === 'POST') {
+      await settleCryptoWithdrawal(context)
+      return true
+    }
+    if (url.pathname === '/api/admin/withdrawals/robux' && request.method === 'POST') {
+      await settleRobuxWithdrawal(context)
       return true
     }
     api.sendJson(response, 404, { error: 'Not found.' })

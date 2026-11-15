@@ -18,6 +18,7 @@ import { handleMinesRequest } from './mines.js'
 import { handlePaymentsRequest } from './payments.js'
 import { handlePromosRequest } from './promos.js'
 import { handleRaceRequest } from './race.js'
+import { handleRobuxRequest } from './robux.js'
 import { handleRouletteRequest } from './roulette.js'
 import { handleTransactionsRequest } from './transactions.js'
 import { handleUpgraderRequest } from './upgrader.js'
@@ -1430,6 +1431,7 @@ export async function handleRequest(request, response, env) {
       handleRaceRequest,
       handlePromosRequest,
       handlePaymentsRequest,
+      handleRobuxRequest,
       handleTransactionsRequest,
       handleAssetsRequest,
       handleUpgraderRequest,
@@ -1448,7 +1450,7 @@ export async function handleRequest(request, response, env) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Authentication failed.'
     const containsInternalConfiguration = /supabase|api key|credential|server environment|fetch failed/i.test(message)
-    const gameServiceRoute = /^\/api\/(?:battles|cases|welcome|affiliates|race|promo-codes|dice|blackjack|coinflip|mines|x-roulette|upgrader)(?:\/|$)/.test(url.pathname)
+    const gameServiceRoute = /^\/api\/(?:battles|cases|welcome|affiliates|race|promo-codes|dice|blackjack|coinflip|mines|x-roulette|upgrader|robux)(?:\/|$)/.test(url.pathname)
     const insufficientGameBalance = gameServiceRoute && /(?:do not have enough|insufficient balance)/i.test(message)
     sendJson(response, gameServiceRoute && containsInternalConfiguration ? 503 : 400, {
       error: insufficientGameBalance

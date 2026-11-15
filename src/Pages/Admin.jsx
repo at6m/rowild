@@ -20,6 +20,19 @@ const DELTA_LIFETIME_MS = 4000
 const DEFAULT_AVATAR = '/assets/users/default-avatar.png'
 const COIN_ICON = '/assets/currency/coin.svg'
 const ROCOIN_ICON = '/assets/currency/rocoin.2d3febd5.svg'
+const WITHDRAWAL_TABS = [
+  { key: 'pending', label: 'Pending' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'canceled', label: 'Canceled' },
+  { key: 'all', label: 'All' },
+]
+const WITHDRAWAL_TYPES = [
+  { key: 'all', label: 'All types' },
+  { key: 'crypto', label: 'Crypto' },
+  { key: 'robux', label: 'Robux' },
+]
+// Wording matches the transaction history so the same status reads the same everywhere.
+const STATUS_LABELS = { pending: 'Pending', completed: 'Completed', canceled: 'Canceled' }
 
 function format(value) {
   return Math.floor(Number(value) || 0).toLocaleString('en-US')
@@ -73,6 +86,58 @@ function Balance({ value, delta }) {
       {delta > 0 && <span className="admin-delta up">+{format(delta)}</span>}
       {delta < 0 && <span className="admin-delta down">-{format(Math.abs(delta))}</span>}
     </span>
+  )
+}
+
+function WithdrawalCard({ item, txid, onTxid, onSettle, busy }) {
+  const pending = item.status === 'pending'
+  return (
+    <article className="admin-wd">
+      <div className="admin-wd-main">
+        <span className={`admin-wd-kind is-${item.kind}`}>{item.kind === 'crypto' ? 'Crypto' : 'Robux'}</span>
+        <span className="admin-wd-player">
+          <img src={item.avatar || DEFAULT_AVATAR} alt="" />
+          <span>{item.username || 'Unknown player'}</span>
+        </span>
+        <span className="admin-wd-amount">
+          <img src={item.kind === 'crypto' ? COIN_ICON : ROCOIN_ICON} alt="" />
+          <strong>{format(item.coins)}</strong>
+          <small>
+            {item.kind === 'crypto'
+              ? `$${item.usd.toFixed(2)} · ~${item.cryptoAmount} ${item.currency} on ${item.network}`
+              : `R$ ${format(item.robux)} · ${format(item.robuxAfterTax)} after tax`}
+          </small>
+        </span>
+        <span className={`admin-status is-${item.status}`}>{STATUS_LABELS[item.status] || item.status}</span>
+      </div>
+      <div className="admin-wd-meta">
+        <span className="admin-wd-dest">
+          {item.kind === 'crypto'
+            ? `${item.currency} · ${item.network} · ${item.address}${item.memo ? ` · memo ${item.memo}` : ''}`
+            : `Roblox ID ${item.robloxId || '—'}`}
+        </span>
+        <span className="admin-wd-date">Requested {joinedLabel(item.createdAt)}</span>
+      </div>
+      {pending && (
+        <div className="admin-wd-actions">
+          {item.kind === 'crypto' && (
+            <input
+              className="admin-wd-input"
+              type="text"
+              placeholder="Payout transaction hash (optional)"
+              value={txid}
+              onChange={(event) => onTxid(event.target.value)}
+            />
+          )}
+          <button type="button" className="admin-btn primary" disabled={Boolean(busy)} onClick={() => onSettle(item, 'completed')}>
+            {busy === 'completed' ? 'Saving…' : 'Mark completed'}
+          </button>
+          <button type="button" className="admin-btn ghost" disabled={Boolean(busy)} onClick={() => onSettle(item, 'canceled')}>
+            {busy === 'canceled' ? 'Saving…' : 'Cancel & refund'}
+          </button>
+        </div>
+      )}
+    </article>
   )
 }
 
@@ -205,6 +270,14 @@ function Admin({ user, onSignIn }) {
   const [resetting, setResetting] = useState(false)
   const [online, setOnline] = useState([])
   const [presenceReady, setPresenceReady] = useState(true)
+  const [withdrawals, setWithdrawals] = useState(null)
+  const [wdStatus, setWdStatus] = useState('pending')
+  const [wdType, setWdType] = useState('all')
+  const [wdLoading, setWdLoading] = useState(false)
+  const [wdError, setWdError] = useState(null)
+  const [wdReload, setWdReload] = useState(0)
+  const [settling, setSettling] = useState(null)
+  const [txids, setTxids] = useState({})
   const [deltas, setDeltas] = useState({})
   const [reloadKey, setReloadKey] = useState(0)
   const previousBalances = useRef(new Map())
@@ -274,6 +347,28 @@ function Admin({ user, onSignIn }) {
     void poll()
     return () => { disposed = true; window.clearTimeout(timer) }
   }, [status, user])
+
+  useEffect(() => {
+    if (status !== 'ready' || !user) return undefined
+    let cancelled = false
+    const controller = new AbortController()
+    const load = async () => {
+      setWdLoading(true)
+      try {
+        const payload = await adminFetch(`/api/admin/withdrawals?status=${wdStatus}&type=${wdType}`, { signal: controller.signal })
+        if (cancelled) return
+        setWithdrawals(payload)
+        setWdError(null)
+      } catch (error) {
+        if (cancelled || error.name === 'AbortError') return
+        setWdError(error.message)
+      } finally {
+        if (!cancelled) setWdLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true; controller.abort() }
+  }, [status, user, wdStatus, wdType, wdReload])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -360,6 +455,36 @@ function Admin({ user, onSignIn }) {
       notify({ type: 'error', message: error.message })
     } finally {
       setResetting(false)
+    }
+  }
+
+  const settleWithdrawal = async (item, action) => {
+    try {
+      setSettling(`${item.id}:${action}`)
+      await adminFetch(item.kind === 'crypto' ? '/api/admin/withdrawals/crypto' : '/api/admin/withdrawals/robux', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: item.id,
+          action,
+          txid: action === 'completed' ? txids[item.id] || undefined : undefined,
+        }),
+      })
+      notify({
+        type: 'success',
+        message: action === 'completed'
+          ? `${item.kind === 'crypto' ? 'Crypto' : 'Robux'} withdrawal marked completed.`
+          : `${item.kind === 'crypto' ? 'Crypto' : 'Robux'} withdrawal canceled and refunded.`,
+      })
+      setTxids((current) => {
+        const next = { ...current }
+        delete next[item.id]
+        return next
+      })
+      setWdReload((value) => value + 1)
+    } catch (error) {
+      notify({ type: 'error', message: error.message })
+    } finally {
+      setSettling(null)
     }
   }
 
@@ -479,6 +604,71 @@ function Admin({ user, onSignIn }) {
           <strong>{format(stats.games || GAME_ORDER.length - 1)}</strong>
           <small>tunable game rates</small>
         </article>
+      </section>
+
+      <section className="admin-panel">
+        <div className="admin-panel-head">
+          <div>
+            <h2>Withdrawals</h2>
+            <p>Crypto and Robux requests reserve the player’s balance. Completing pays it out; canceling refunds it.</p>
+          </div>
+          <span className="admin-panel-tag">{format(withdrawals?.counts?.total)} pending</span>
+        </div>
+
+        <div className="admin-wd-tools">
+          <div className="admin-wd-tabs">
+            {WITHDRAWAL_TABS.map((tab) => (
+              <button type="button" key={tab.key} className={wdStatus === tab.key ? 'is-active' : ''} onClick={() => setWdStatus(tab.key)}>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="admin-wd-tabs">
+            {WITHDRAWAL_TYPES.map((option) => (
+              <button type="button" key={option.key} className={wdType === option.key ? 'is-active' : ''} onClick={() => setWdType(option.key)}>
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="admin-btn ghost" disabled={wdLoading} onClick={() => setWdReload((value) => value + 1)}>
+            {wdLoading ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
+
+        {withdrawals?.robuxReady === false && (
+          <div className="admin-banner warning">
+            <strong>Robux withdrawals are not installed yet.</strong>
+            <span>Run <code>npx supabase db push --include-all</code> to add the queue; crypto requests already list here.</span>
+          </div>
+        )}
+
+        {wdError && (
+          <div className="admin-banner error">
+            <strong>Could not load withdrawals.</strong>
+            <span>{wdError}</span>
+          </div>
+        )}
+
+        <div className="admin-wd-list">
+          {withdrawals?.items?.length ? withdrawals.items.map((item) => (
+            <WithdrawalCard
+              key={`${item.kind}-${item.id}`}
+              item={item}
+              txid={txids[item.id] || ''}
+              onTxid={(value) => setTxids((current) => ({ ...current, [item.id]: value }))}
+              onSettle={settleWithdrawal}
+              busy={settling?.startsWith(`${item.id}:`) ? settling.split(':')[1] : null}
+            />
+          )) : (
+            <div className="admin-empty">
+              {wdLoading && !withdrawals
+                ? 'Loading withdrawals…'
+                : wdStatus === 'pending'
+                  ? 'No withdrawals are waiting.'
+                  : 'No withdrawals in this view.'}
+            </div>
+          )}
+        </div>
       </section>
 
       <section className="admin-panel">
