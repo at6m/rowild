@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { blackjackForcedOutcome, chancePercentFor, forceBlackjackDeal } from './chance.js'
+import { blackjackForcedOutcome, chancePercentFor, findForcedBlackjackDeck, forcedBlackjackDeck } from './chance.js'
 
 export async function handleBlackjackRequest({ request, response, url, env, api }) {
   const { sendJson, readJson, startRealtimeSession, supabaseRequest, requestSessionUser, selectedCurrency, blackjackCardValue, blackjackNatural, createBlackjackDeck, publicBlackjackGame, settleBlackjack, broadcastRealtime } = api
@@ -32,12 +32,20 @@ export async function handleBlackjackRequest({ request, response, url, env, api 
       const clientSeed = String(body.clientSeed || sessionUser.uuid).slice(0, 128)
       const serverSeed = randomBytes(24).toString('hex')
       const serverSeedHash = createHash('sha256').update(serverSeed).digest('hex')
-      // Win chance (50 = untouched) pre-decides the opening deal; the player's
-      // later hit/stand choices still decide the hand.
+      // Win chance (50 = untouched) pre-decides the round. Instead of scripting
+      // one fixed deal, the search keeps drawing seeded shuffles until one
+      // naturally lands the forced result, so hands stay varied and read like
+      // a normal shoe. The result survives standing, an immediate hit or a
+      // double, and the fallback covers the (rare) exhausted search.
       const chance = await chancePercentFor(env, supabaseRequest, sessionUser.uuid, 'blackjack')
       const forced = blackjackForcedOutcome(chance, `${serverSeed}:${clientSeed}:${nonce}`)
       const baseDeck = createBlackjackDeck(serverSeed, clientSeed, nonce)
-      const deck = forced ? forceBlackjackDeal(baseDeck, forced) : baseDeck
+      const deck = forced
+        ? findForcedBlackjackDeck({
+          outcome: forced,
+          createDeck: (attempt) => createBlackjackDeck(serverSeed, `${clientSeed}:chance:${attempt}`, nonce),
+        }) || forcedBlackjackDeck(baseDeck, forced)
+        : baseDeck
       const playerCards = [deck[0], deck[2]]
       const dealerCards = [deck[1], deck[3]]
       let deckPosition = 4

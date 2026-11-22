@@ -44,7 +44,7 @@ export async function chancePercentFor(env, supabaseRequest, userUuid, game) {
   }
 }
 
-/** Pre-decides a blackjack deal at the extreme ends of the scale. */
+/** Decides whether this round is forced, and which way. */
 export function blackjackForcedOutcome(chance, seed) {
   if (chance === null || chance === undefined) return null
   const value = Number(chance)
@@ -56,13 +56,87 @@ export function blackjackForcedOutcome(chance, seed) {
   return draw < (DEFAULT_CHANCE - value) / DEFAULT_CHANCE ? 'loss' : null
 }
 
+function handValue(cards) {
+  let value = 0
+  let aces = 0
+  for (const card of Array.isArray(cards) ? cards : []) {
+    if (card?.rank === 'A') { value += 11; aces += 1 }
+    else if (['K', 'Q', 'J'].includes(card?.rank)) value += 10
+    else value += Math.max(0, Math.trunc(Number(card?.rank) || 0))
+  }
+  while (value > 21 && aces > 0) { value -= 10; aces -= 1 }
+  return value
+}
+
+function isNatural(cards) {
+  return Array.isArray(cards) && cards.length === 2 && handValue(cards) === 21
+}
+
 /**
- * Rewrites the top of a shuffled blackjack deck so the opening hand lands the
- * chosen way: a player natural 21 against a dealer that must bust, or a stiff
- * 16 against a dealer 20. Later hit/stand decisions are still the player's.
+ * Mirrors settleBlackjack: the dealer hits until 17+ and hands are compared
+ * against that final total. `startIndex` is where the dealer starts drawing.
  */
-export function forceBlackjackDeal(deck, outcome) {
-  if (!Array.isArray(deck) || deck.length < 10) return deck
+function dealResult(playerCards, dealerCards, deck, startIndex) {
+  const dealer = dealerCards.map((card) => ({ ...card }))
+  let index = startIndex
+  while (handValue(dealer) < 17 && index < deck.length) {
+    dealer.push(deck[index])
+    index += 1
+    if (dealer.length > 10) break
+  }
+  const playerValue = handValue(playerCards)
+  const dealerValue = handValue(dealer)
+  if (playerValue > 21) return 'lose'
+  if (isNatural(playerCards) && !isNatural(dealerCards)) return 'won'
+  if (isNatural(playerCards) && isNatural(dealerCards)) return 'push'
+  if (isNatural(dealerCards)) return 'lose'
+  if (dealerValue > 21 || playerValue > dealerValue) return 'won'
+  if (playerValue === dealerValue) return 'push'
+  return 'lose'
+}
+
+/**
+ * True when the freshly shuffled deck already lands the forced result and the
+ * player cannot undo it with the obvious move: standing, hitting once, or
+ * doubling all resolve the same way. Deals with an Ace up, a dealer natural,
+ * or a split-able pair are skipped so there is no insurance or split detour.
+ */
+export function blackjackDealIsForced(deck, outcome) {
+  if (!Array.isArray(deck) || deck.length < 12) return false
+  const playerCards = [deck[0], deck[2]]
+  const dealerCards = [deck[1], deck[3]]
+  if (dealerCards[0]?.rank === 'A' || isNatural(dealerCards)) return false
+  if (playerCards[0]?.rank === playerCards[1]?.rank) return false
+  const wanted = outcome === 'win' ? 'won' : 'lose'
+  const stand = dealResult(playerCards, dealerCards, deck, 4)
+  if (stand !== wanted) return false
+  // A natural is settled on the deal, so there is no hit to defend against.
+  if (isNatural(playerCards)) return outcome === 'win'
+  const hit = dealResult([...playerCards, deck[4]], dealerCards, deck, 5)
+  if (hit !== wanted) return false
+  // Doubling draws exactly one card too, so the hit result already covers it.
+  return hit === wanted
+}
+
+/**
+ * Draws fresh seeded shuffles until one natively produces the forced result.
+ * The hands therefore keep the game's normal distribution (varied totals,
+ * dealer busts, the occasional natural) instead of a fixed scripted deal.
+ */
+export function findForcedBlackjackDeck({ createDeck, outcome, attempts = 600 }) {
+  if (typeof createDeck !== 'function') return null
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const deck = createDeck(attempt)
+    if (blackjackDealIsForced(deck, outcome)) return deck
+  }
+  return null
+}
+
+/**
+ * Last-resort deal if the search is exhausted: a low hand against a dealer that
+ * must bust (win), or a stiff hand whose next card busts (loss).
+ */
+export function forcedBlackjackDeck(deck, outcome) {
   const working = deck.map((card) => ({ ...card }))
   const take = (ranks) => {
     const index = working.findIndex((card) => ranks.includes(card.rank))
@@ -70,7 +144,7 @@ export function forceBlackjackDeal(deck, outcome) {
     return working.splice(index, 1)[0]
   }
   const front = outcome === 'win'
-    ? [take(['A']), take(['9']), take(['K', 'Q', 'J', '10']), take(['7']), take(['K', 'Q', 'J', '10'])]
-    : [take(['10', 'J', 'Q', 'K']), take(['K', 'Q', 'J', '10']), take(['6']), take(['Q', 'J', '10', 'K']), take(['5'])]
+    ? [take(['4']), take(['10', 'J', 'Q', 'K']), take(['6']), take(['6']), take(['10', 'J', 'Q', 'K'])]
+    : [take(['10', 'J', 'Q', 'K']), take(['K', 'Q', 'J', '10']), take(['2']), take(['K', 'Q', 'J', '10']), take(['K', 'Q', 'J', '10'])]
   return [...front, ...working]
 }
