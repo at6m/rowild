@@ -247,3 +247,330 @@ function HomeWelcome({ user, onRewards }) {
     </div>
   )
 }
+
+function GameCard({ name, video, icon, wide, route, isNew = false, locked = false, lockedMessage = 'This game is currently locked.' }) {
+  const videoRef = useRef(null)
+  const canvasRef = useRef(null)
+  const sessionRef = useRef({ frames: [], captureId: null, rewindRaf: null, token: 0 })
+
+  const stopCapture = () => {
+    const media = videoRef.current
+    const session = sessionRef.current
+    if (session.captureId !== null) {
+      if (media && typeof media.cancelVideoFrameCallback === 'function') media.cancelVideoFrameCallback(session.captureId)
+      else cancelAnimationFrame(session.captureId)
+      session.captureId = null
+    }
+  }
+
+  const stopRewind = () => {
+    const session = sessionRef.current
+    if (session.rewindRaf !== null) cancelAnimationFrame(session.rewindRaf)
+    session.rewindRaf = null
+  }
+
+  const mediaSize = () => {
+    const media = videoRef.current
+    const bounds = media?.parentElement?.getBoundingClientRect()
+    return bounds && bounds.width > 1 && bounds.height > 1
+      ? { width: Math.max(1, Math.round(bounds.width)), height: Math.max(1, Math.round(bounds.height)) }
+      : { width: Math.max(1, media?.clientWidth || 320), height: Math.max(1, media?.clientHeight || 200) }
+  }
+
+  const drawCover = (context, source, width, height, sourceWidth, sourceHeight) => {
+    if (!context || !source || !width || !height || !sourceWidth || !sourceHeight) return
+    const scale = Math.max(width / sourceWidth, height / sourceHeight)
+    const cropWidth = width / scale
+    const cropHeight = height / scale
+    context.drawImage(source, (sourceWidth - cropWidth) / 2, (sourceHeight - cropHeight) / 2, cropWidth, cropHeight, 0, 0, width, height)
+  }
+
+  const captureFrame = () => {
+    const media = videoRef.current
+    const session = sessionRef.current
+    if (!media?.videoWidth || !media.videoHeight || session.frames.length >= 60) return
+    const size = mediaSize()
+    const scale = Math.min(1, 720 / size.width)
+    const frame = document.createElement('canvas')
+    frame.width = Math.max(1, Math.round(size.width * scale))
+    frame.height = Math.max(1, Math.round(size.height * scale))
+    drawCover(frame.getContext('2d'), media, frame.width, frame.height, media.videoWidth, media.videoHeight)
+    session.frames.push(frame)
+  }
+
+  const startCapture = (token) => {
+    const media = videoRef.current
+    const session = sessionRef.current
+    const capture = () => {
+      if (!media || session.token !== token || media.paused || media.ended || session.frames.length >= 60) {
+        session.captureId = null
+        return
+      }
+      captureFrame()
+      session.captureId = typeof media.requestVideoFrameCallback === 'function'
+        ? media.requestVideoFrameCallback(capture)
+        : requestAnimationFrame(capture)
+    }
+    session.captureId = typeof media?.requestVideoFrameCallback === 'function'
+      ? media.requestVideoFrameCallback(capture)
+      : requestAnimationFrame(capture)
+  }
+
+  const playCardVideo = () => {
+    const media = videoRef.current
+    const canvas = canvasRef.current
+    if (!media) return
+    const session = sessionRef.current
+    session.token += 1
+    const token = session.token
+    stopCapture()
+    stopRewind()
+    session.frames = []
+    media.pause()
+    media.playbackRate = 1
+    media.currentTime = 0
+    media.classList.remove('is-hidden')
+    canvas?.classList.remove('is-active')
+    captureFrame()
+    const playback = media.play()
+    if (playback && typeof playback.then === 'function') playback.then(() => {
+      if (session.token === token) startCapture(token)
+    }).catch(() => {})
+    else startCapture(token)
+  }
+
+  const rewindCardVideo = () => {
+    const media = videoRef.current
+    const canvas = canvasRef.current
+    if (!media) return
+    const session = sessionRef.current
+    session.token += 1
+    const token = session.token
+    stopCapture()
+    stopRewind()
+    const frames = session.frames.slice()
+    if (!frames.length || !canvas) {
+      media.pause()
+      media.currentTime = 0
+      media.classList.remove('is-hidden')
+      canvas?.classList.remove('is-active')
+      session.frames = []
+      return
+    }
+
+    const size = mediaSize()
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
+    canvas.width = Math.round(size.width * pixelRatio)
+    canvas.height = Math.round(size.height * pixelRatio)
+    const context = canvas.getContext('2d')
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
+    context.imageSmoothingEnabled = true
+    const paintFrame = (frame) => {
+      context.clearRect(0, 0, size.width, size.height)
+      context.drawImage(frame, 0, 0, frame.width, frame.height, 0, 0, size.width, size.height)
+    }
+    paintFrame(frames.at(-1))
+    media.pause()
+    canvas.classList.add('is-active')
+
+    requestAnimationFrame(() => {
+      if (session.token !== token) return
+      media.classList.add('is-hidden')
+      let frameIndex = frames.length - 2
+      let previousTime = performance.now()
+      let elapsed = 0
+      const frameDuration = 1000 / 48
+      const rewind = (time) => {
+        if (session.token !== token) return
+        elapsed += time - previousTime
+        previousTime = time
+        while (elapsed >= frameDuration && frameIndex >= 0) {
+          elapsed -= frameDuration
+          paintFrame(frames[frameIndex])
+          frameIndex -= 1
+        }
+        if (frameIndex >= 0) session.rewindRaf = requestAnimationFrame(rewind)
+        else {
+          media.currentTime = 0
+          session.rewindRaf = null
+          session.frames = []
+        }
+      }
+      session.rewindRaf = requestAnimationFrame(rewind)
+    })
+  }
+
+  useEffect(() => () => {
+    sessionRef.current.token += 1
+    stopCapture()
+    stopRewind()
+    sessionRef.current.frames = []
+  }, [])
+
+  const Card = locked ? 'div' : 'a'
+  const cardProps = locked
+    ? {
+        role: 'button',
+        tabIndex: 0,
+        'aria-disabled': 'true',
+        'aria-label': `${name} is locked`,
+        onClick: () => notify({ type: 'error', message: lockedMessage }),
+        onKeyDown: (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          notify({ type: 'error', message: lockedMessage })
+        },
+      }
+    : { href: route }
+
+  return (
+    <Card
+      {...cardProps}
+      className={`game-card${wide ? ` ${wide}` : ''}${locked ? ' game-card-locked' : ''}`}
+      data-v-1cd04c6a=""
+      onMouseEnter={playCardVideo}
+      onMouseLeave={rewindCardVideo}
+    >
+      <div className="game-card-media" data-v-1cd04c6a="">
+        <video ref={videoRef} className="game-media" src={video} muted playsInline preload="auto" data-v-1cd04c6a="" />
+        <canvas ref={canvasRef} className="game-media-canvas" aria-hidden="true" data-v-1cd04c6a="" />
+      </div>
+      <div className="game-card-label" data-v-1cd04c6a="">
+        <SiteIcon name={icon} className="game-card-icon" data-v-1cd04c6a="" /><span className="game-card-name" data-v-1cd04c6a="">{name}</span>{isNew && <span className="game-card-new" data-v-1cd04c6a="">NEW</span>}
+      </div>
+      {locked && (
+        <div className="game-card-lock" data-v-1cd04c6a="">
+          <img src="/assets/rewards/current/locked.8cc650fb.svg" alt="" data-v-1cd04c6a="" />
+          <span data-v-1cd04c6a="">LOCKED</span>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function HomeGames() {
+  return (
+    <section className="games-section" data-v-1cd04c6a="" data-v-30c4bf74="">
+      <div className="originals-block" data-v-1cd04c6a="">
+        <div className="title-container" data-v-1cd04c6a=""><div className="title-text" data-v-1cd04c6a=""><h2 className="title" data-v-1cd04c6a=""><SiteIcon name="fire" data-v-1cd04c6a="" /> RoWild Originals</h2></div></div>
+        <div className="originals-grid" data-v-1cd04c6a="">
+          {originals.map(([name, video, icon, wide, route, isNew]) => <GameCard key={name} name={name} video={video} icon={icon} wide={wide} route={route} isNew={isNew} locked={icon === 'upgrader' && UPGRADER_LOCKED} lockedMessage={UPGRADER_LOCKED_MESSAGE} />)}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function HomeInfoBanner() {
+  const cards = [
+    ['blue', 'community', 'Community', 'Join our Discord server to participate in giveaways!', 'https://discord.com'],
+    ['green', 'rewards', 'Rewards', 'Earn exclusive rewards every time you play!', '/rewards'],
+    ['yellow', 'promotions', 'Promotions', 'Follow us on X to redeem exclusive promotions!', 'https://x.com'],
+  ]
+  return (
+    <div className="home-info-banner-container" data-v-8631d556="" data-v-30c4bf74="">
+      <div className="home-info-banner" data-v-8631d556="">
+        {cards.map(([color, icon, title, description, href]) => (
+          <a className="banner-item" data-v-8631d556="" key={title} href={href}>
+            <div className={`info-banner-item ${color}`} data-v-8631d556="">
+              <div className={`info-banner-item-icon ${color}`} data-v-8631d556=""><SiteIcon name={icon} className={`icon-${icon} ${color}`} data-v-8631d556="" /></div>
+              <div className="info-banner-item-title" data-v-8631d556=""><h2 data-v-8631d556="">{title}</h2></div>
+              <div className="info-banner-item-description" data-v-8631d556=""><p data-v-8631d556="">{description}</p></div>
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function HomeMethods() {
+  const row = methods.concat(methods, methods)
+  const sliderRef = useRef(null)
+  const leftTrackRef = useRef(null)
+  const rightTrackRef = useRef(null)
+
+  useEffect(() => {
+    let frame = null
+    let totalWidth = 0
+    let translateLeft = 0
+    let translateRight = 0
+
+    const setTrackPositions = () => {
+      if (leftTrackRef.current) leftTrackRef.current.style.transform = `translateX(${translateLeft}px)`
+      if (rightTrackRef.current) rightTrackRef.current.style.transform = `translateX(${translateRight}px)`
+    }
+
+    const calculateWidth = () => {
+      const item = sliderRef.current?.querySelector('.method-item')
+      if (!item) return
+      const style = window.getComputedStyle(item)
+      const itemWidth = item.offsetWidth + parseFloat(style.marginLeft || 0) + parseFloat(style.marginRight || 0)
+      totalWidth = itemWidth * methods.length
+      translateLeft = 0
+      translateRight = -totalWidth
+      setTrackPositions()
+    }
+
+    const animate = () => {
+      if (totalWidth > 0) {
+        translateLeft -= 0.25
+        if (Math.abs(translateLeft) >= totalWidth) translateLeft = 0
+        translateRight += 0.25
+        if (translateRight >= 0) translateRight = -totalWidth
+        setTrackPositions()
+      }
+      frame = requestAnimationFrame(animate)
+    }
+
+    calculateWidth()
+    window.addEventListener('resize', calculateWidth)
+    frame = requestAnimationFrame(animate)
+    return () => {
+      window.removeEventListener('resize', calculateWidth)
+      if (frame !== null) cancelAnimationFrame(frame)
+    }
+  }, [])
+
+  return (
+    <div className="payment-methods-container" data-v-779fab0e="" data-v-30c4bf74="">
+      <h3 className="methods-subtitle" data-v-779fab0e="">Select your preferred payment method</h3>
+      <div className="methods-stack" data-v-779fab0e="">
+        {[row, [...row].reverse()].map((methodRow, rowIndex) => (
+          <div className="methods-slider" data-v-779fab0e="" key={rowIndex} ref={rowIndex === 0 ? sliderRef : undefined}>
+            <div className="methods-track" data-v-779fab0e="" ref={rowIndex === 0 ? leftTrackRef : rightTrackRef}>
+              {methodRow.map(([name, image], index) => (
+                <div className={`method-item ${name}`} data-v-779fab0e="" key={`${rowIndex}-${name}-${index}`}>
+                  <div className="method-inner" data-v-779fab0e=""><img src={image} alt={name} data-v-779fab0e="" /></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function Home({ user }) {
+  const openRewards = () => {
+    window.history.pushState({}, '', '/rewards')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }
+
+  useEffect(() => {
+    document.title = 'RoWild.lol - #1 Roblox Arcade Platform'
+  }, [])
+
+  return (
+    <div className="home" data-v-30c4bf74="">
+      <div className="home-top" data-v-30c4bf74=""><HomeWelcome user={user} onRewards={openRewards} /><HomeBanner /></div>
+      <HomeGames />
+      <HomeInfoBanner />
+      <HomeMethods />
+      <Bets />
+    </div>
+  )
+}
+
+export default Home
