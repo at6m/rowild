@@ -7,7 +7,7 @@
  *
  *   node scripts/payout.mjs                          # list withdrawals waiting
  *   node scripts/payout.mjs <uuid> paid <txid>       # payout sent
- *   node scripts/payout.mjs <uuid> failed [note]     # refund the coins
+ *   node scripts/payout.mjs <uuid> failed <reason>   # refund the coins and record why
  */
 import { loadEnv } from 'vite'
 
@@ -71,6 +71,7 @@ async function finalize(uuid, outcome, detail) {
     p_uuid: uuid,
     p_track_id: detail && !paid ? null : detail || null,
     p_status: paid ? 'complete' : 'failed',
+    p_reason: paid ? null : detail || null,
     p_payload: { provider: 'nowpayments', manual_payout: true, ...(paid ? { txid: detail || null } : { note: detail || null }), settled_at: new Date().toISOString() },
   }
   const result = await rest('/rest/v1/rpc/finalize_rorisk_crypto_withdrawal', { method: 'POST', body: JSON.stringify(payload) })

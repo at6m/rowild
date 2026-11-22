@@ -278,6 +278,10 @@ function CryptoDeposit({ method, user }) {
   const [config, setConfig] = useState(null)
   const [payment, setPayment] = useState(null)
   const [status, setStatus] = useState(null)
+  const [creditedCoins, setCreditedCoins] = useState(0)
+  const [receivedAmount, setReceivedAmount] = useState(0)
+  const [settled, setSettled] = useState(false)
+  const creditedRef = useRef(0)
   const [loading, setLoading] = useState(false)
   const automaticRequestRef = useRef(false)
   useEffect(() => {
@@ -379,17 +383,26 @@ function CryptoDeposit({ method, user }) {
     return () => window.clearTimeout(timer)
   }, [belowMinimum, config, createDeposit, quoteReady, unavailable, user])
   useEffect(() => {
-    if (!payment?.paymentId || status === 'paid' || status === 'expired') return undefined
+    if (!payment?.paymentId || settled || status === 'expired') return undefined
     let disposed = false
     const poll = async () => {
       try {
         const response = await fetch(`/api/payments/nowpayments/deposit/${payment.paymentId}`, { cache: 'no-store' })
         const payload = await response.json()
         if (disposed || !response.ok) return
-        const next = payload.deposit?.status
+        const deposit = payload.deposit || {}
+        const next = deposit.status
         if (!next) return
         setStatus(next)
-        if (next === 'paid') notify({ type: 'success', message: `${Number(payload.deposit.coinAmount || 0).toLocaleString('en-US')} Coins credited to your balance.` })
+        if (deposit.credited) setSettled(true)
+        if (deposit.receivedAmount !== undefined) setReceivedAmount(Number(deposit.receivedAmount) || 0)
+        const credited = Number(deposit.creditedCoins) || 0
+        if (credited > creditedRef.current) {
+          const delta = credited - creditedRef.current
+          creditedRef.current = credited
+          setCreditedCoins(credited)
+          notify({ type: 'success', message: `${delta.toLocaleString('en-US')} Coins credited to your balance.` })
+        }
       } catch {
         // A missed poll is harmless; the next one retries.
       }
@@ -397,10 +410,14 @@ function CryptoDeposit({ method, user }) {
     void poll()
     const timer = window.setInterval(poll, 5000)
     return () => { disposed = true; window.clearInterval(timer) }
-  }, [payment?.paymentId, status])
+  }, [payment?.paymentId, settled, status])
   const resetPayment = () => {
     setPayment(null)
     setStatus(null)
+    setCreditedCoins(0)
+    setReceivedAmount(0)
+    setSettled(false)
+    creditedRef.current = 0
   }
   return <div className="modal-crypto" {...cryptoModalScope}>
     <div className="crypto-content" {...cryptoModalScope}>
@@ -413,10 +430,12 @@ function CryptoDeposit({ method, user }) {
         </div>
         <div className="solana-deposit-status" data-status={status || 'idle'} {...cryptoDepositScope}>
           <div className="solana-status-line" {...cryptoDepositScope}>
-            {status === 'paid'
-              ? `Payment confirmed — ${Number(payment?.coinAmount || 0).toLocaleString('en-US')} Coins credited to your balance.`
-              : status === 'expired'
-                ? 'This payment request expired. Generate a new address to continue.'
+            {settled || status === 'paid'
+              ? `Payment confirmed — ${Number(creditedCoins || payment?.coinAmount || 0).toLocaleString('en-US')} Coins credited to your balance.`
+              : creditedCoins > 0
+                ? `Partially paid — ${receivedAmount} ${payment?.currency || ''} received so far and ${creditedCoins.toLocaleString('en-US')} Coins credited. Send the rest to the same address before this request expires.`
+                : status === 'expired'
+                  ? 'This payment request expired. Generate a new address to continue.'
                 : belowMinimum
                   ? `The minimum ${detail.name} deposit is $${minimumUsd.toFixed(2)} right now — raise the amount to continue.`
                   : unavailable

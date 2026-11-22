@@ -218,8 +218,17 @@ export function verifyIpnSignature(payload, signature, secret) {
   return suppliedBuffer.length === expectedBuffer.length && timingSafeEqual(suppliedBuffer, expectedBuffer)
 }
 
+function receivedCryptoAmount(payment, status) {
+  const actual = Number(payment?.actually_paid)
+  if (Number.isFinite(actual) && actual >= 0) return actual
+  // Older payloads omit actually_paid; only a completed payment implies the full amount.
+  if (status === 'paid') return Number(payment?.pay_amount) || 0
+  return 0
+}
+
 export function publicDeposit(deposit, result = {}) {
-  const credited = Boolean(result.credited) || Boolean(deposit.credited)
+  const creditedCoins = Number(result.deposit?.credited_coins ?? deposit.credited_coins) || 0
+  const credited = Boolean(result.deposit?.credited) || Boolean(deposit.credited)
   const status = credited ? 'paid' : result.status || deposit.status
   const expired = status === 'expired' || (status === 'pending' && deposit.expires_at && Date.now() > new Date(deposit.expires_at).getTime())
   return {
@@ -235,6 +244,10 @@ export function publicDeposit(deposit, result = {}) {
     qrCode: deposit.qr_code || null,
     status,
     credited,
+    creditedCoins,
+    receivedAmount: Number(deposit.received_amount) || 0,
+    expectedAmount: Number(deposit.pay_amount) || 0,
+    partiallyPaid: creditedCoins > 0 && !credited,
     expired: Boolean(expired),
     expiresAt: deposit.expires_at || null,
   }
@@ -345,6 +358,8 @@ export async function fetchDepositByPaymentId(supabaseRequest, env, paymentId) {
 
 async function finalizeDeposit({ env, supabaseRequest, payment, orderId }) {
   const status = mapPaymentStatus(payment?.payment_status)
+  // The credit follows what actually arrived, never the requested amount alone.
+  const receivedAmount = receivedCryptoAmount(payment, status)
   const result = await supabaseRequest(env, '/rest/v1/rpc/finalize_rorisk_crypto_deposit', {
     method: 'POST',
     body: JSON.stringify({
@@ -352,11 +367,13 @@ async function finalizeDeposit({ env, supabaseRequest, payment, orderId }) {
       p_track_id: String(payment?.payment_id || ''),
       p_status: status,
       p_payload: { provider: 'nowpayments', payment },
+      p_received_amount: receivedAmount,
     }),
   })
   return {
     status,
-    credited: status === 'paid' || Boolean(result?.deposit?.credited),
+    creditedCoins: Number(result?.deposit?.credited_coins) || 0,
+    credited: Boolean(result?.deposit?.credited),
     user: result?.user || null,
     deposit: result?.deposit || null,
   }
@@ -383,10 +400,8 @@ export async function refreshDeposit({ env, supabaseRequest, deposit }) {
     return { status: deposit.status, credited: false, unavailable: true }
   }
 
-  const status = mapPaymentStatus(payment?.payment_status)
-  // Writing every poll would churn the ledger row for no reason.
-  if (status === deposit.status && status !== 'paid') return { status, credited: false }
-
+  // Both the status and the received amount can move, and the database credits
+  // only the difference, so every poll is safe to apply.
   try {
     return await finalizeDeposit({ env, supabaseRequest, payment: { ...payment, payment_id: payment?.payment_id || deposit.track_id }, orderId: deposit.uuid })
   } catch {

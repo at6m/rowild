@@ -89,7 +89,7 @@ function Balance({ value, delta }) {
   )
 }
 
-function WithdrawalCard({ item, txid, onTxid, onSettle, busy }) {
+function WithdrawalCard({ item, txid, reason, onTxid, onReason, onSettle, busy }) {
   const pending = item.status === 'pending'
   return (
     <article className="admin-wd">
@@ -118,6 +118,11 @@ function WithdrawalCard({ item, txid, onTxid, onSettle, busy }) {
         </span>
         <span className="admin-wd-date">Requested {joinedLabel(item.createdAt)}</span>
       </div>
+      {item.cancelReason && (
+        <div className="admin-wd-reason">
+          <strong>Reason:</strong> {item.cancelReason}
+        </div>
+      )}
       {pending && (
         <div className="admin-wd-actions">
           {item.kind === 'crypto' && (
@@ -129,10 +134,18 @@ function WithdrawalCard({ item, txid, onTxid, onSettle, busy }) {
               onChange={(event) => onTxid(event.target.value)}
             />
           )}
+          <input
+            className="admin-wd-input"
+            type="text"
+            placeholder="Reason if you cancel (required)"
+            maxLength={300}
+            value={reason}
+            onChange={(event) => onReason(event.target.value)}
+          />
           <button type="button" className="admin-btn primary" disabled={Boolean(busy)} onClick={() => onSettle(item, 'completed')}>
             {busy === 'completed' ? 'Saving…' : 'Mark completed'}
           </button>
-          <button type="button" className="admin-btn ghost" disabled={Boolean(busy)} onClick={() => onSettle(item, 'canceled')}>
+          <button type="button" className="admin-btn ghost" disabled={Boolean(busy) || !String(reason || '').trim()} onClick={() => onSettle(item, 'canceled')}>
             {busy === 'canceled' ? 'Saving…' : 'Cancel & refund'}
           </button>
         </div>
@@ -278,6 +291,7 @@ function Admin({ user, onSignIn }) {
   const [wdReload, setWdReload] = useState(0)
   const [settling, setSettling] = useState(null)
   const [txids, setTxids] = useState({})
+  const [reasons, setReasons] = useState({})
   const [deltas, setDeltas] = useState({})
   const [reloadKey, setReloadKey] = useState(0)
   const previousBalances = useRef(new Map())
@@ -467,6 +481,7 @@ function Admin({ user, onSignIn }) {
           id: item.id,
           action,
           txid: action === 'completed' ? txids[item.id] || undefined : undefined,
+          reason: action === 'canceled' ? reasons[item.id] || undefined : undefined,
         }),
       })
       notify({
@@ -476,6 +491,11 @@ function Admin({ user, onSignIn }) {
           : `${item.kind === 'crypto' ? 'Crypto' : 'Robux'} withdrawal canceled and refunded.`,
       })
       setTxids((current) => {
+        const next = { ...current }
+        delete next[item.id]
+        return next
+      })
+      setReasons((current) => {
         const next = { ...current }
         delete next[item.id]
         return next
@@ -655,7 +675,9 @@ function Admin({ user, onSignIn }) {
               key={`${item.kind}-${item.id}`}
               item={item}
               txid={txids[item.id] || ''}
+              reason={reasons[item.id] || ''}
               onTxid={(value) => setTxids((current) => ({ ...current, [item.id]: value }))}
+              onReason={(value) => setReasons((current) => ({ ...current, [item.id]: value }))}
               onSettle={settleWithdrawal}
               busy={settling?.startsWith(`${item.id}:`) ? settling.split(':')[1] : null}
             />

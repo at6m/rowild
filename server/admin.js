@@ -327,7 +327,7 @@ async function withdrawals(context) {
     try {
       const { data } = await query(
         env,
-        `/rest/v1/rorisk_crypto_withdrawals?select=uuid,user_uuid,coin_amount,usd_amount,crypto_amount,currency,network,address,memo,status,provider_payload,created_at,completed_at${statusQuery('crypto')}&order=created_at.${order}&limit=${limit}`,
+        `/rest/v1/rorisk_crypto_withdrawals?select=uuid,user_uuid,coin_amount,usd_amount,crypto_amount,currency,network,address,memo,status,cancel_reason,provider_payload,created_at,completed_at${statusQuery('crypto')}&order=created_at.${order}&limit=${limit}`,
       )
       crypto = Array.isArray(data) ? data : []
     } catch (error) {
@@ -342,7 +342,7 @@ async function withdrawals(context) {
     try {
       const { data } = await query(
         env,
-        `/rest/v1/rorisk_robux_withdrawals?select=uuid,user_uuid,roblox_id,rocoins,robux,robux_after_tax,status,note,created_at,completed_at${statusQuery('robux')}&order=created_at.${order}&limit=${limit}`,
+        `/rest/v1/rorisk_robux_withdrawals?select=uuid,user_uuid,roblox_id,rocoins,robux,robux_after_tax,status,note,cancel_reason,created_at,completed_at${statusQuery('robux')}&order=created_at.${order}&limit=${limit}`,
       )
       robux = Array.isArray(data) ? data : []
     } catch (error) {
@@ -377,6 +377,7 @@ async function withdrawals(context) {
       address: row.address || '',
       memo: row.memo || null,
       txid: row.provider_payload?.txid || null,
+      cancelReason: row.cancel_reason || null,
       createdAt: row.created_at,
       settledAt: row.completed_at || null,
     })),
@@ -391,6 +392,7 @@ async function withdrawals(context) {
       robuxAfterTax: Number(row.robux_after_tax) || 0,
       robloxId: row.roblox_id || null,
       note: row.note || null,
+      cancelReason: row.cancel_reason || null,
       createdAt: row.created_at,
       settledAt: row.completed_at || null,
     })),
@@ -430,6 +432,8 @@ async function settleCryptoWithdrawal(context) {
   const { id, action } = readWithdrawalAction(body)
   const txid = String(body?.txid || '').trim().slice(0, 200)
   const note = String(body?.note || '').trim().slice(0, 300)
+  const reason = String(body?.reason || '').trim().slice(0, 300)
+  if (action === 'canceled' && !reason) throw httpError('Add a reason for canceling this withdrawal.', 400)
 
   const { data } = await query(env, `/rest/v1/rorisk_crypto_withdrawals?uuid=eq.${id}&select=uuid,status&limit=1`)
   const row = data?.[0]
@@ -442,12 +446,14 @@ async function settleCryptoWithdrawal(context) {
       p_uuid: id,
       p_track_id: action === 'completed' ? txid || null : null,
       p_status: action === 'completed' ? 'complete' : 'failed',
+      p_reason: action === 'canceled' ? reason : null,
       p_payload: {
         provider: 'nowpayments',
         manual_payout: true,
         admin: admin.uuid,
         ...(action === 'completed' && txid ? { txid } : {}),
         ...(note ? { note } : {}),
+        ...(action === 'canceled' && reason ? { reason } : {}),
         settled_at: new Date().toISOString(),
       },
     },
@@ -466,11 +472,13 @@ async function settleRobuxWithdrawal(context) {
   const body = await api.readJson(request)
   const { id, action } = readWithdrawalAction(body)
   const note = String(body?.note || '').trim().slice(0, 300)
+  const reason = String(body?.reason || '').trim().slice(0, 300)
+  if (action === 'canceled' && !reason) throw httpError('Add a reason for canceling this withdrawal.', 400)
 
   try {
     const result = await query(env, '/rest/v1/rpc/finalize_rorisk_robux_withdrawal', {
       method: 'POST',
-      body: { p_uuid: id, p_status: action, p_note: note || null },
+      body: { p_uuid: id, p_status: action, p_note: note || null, p_reason: action === 'canceled' ? reason : null },
     })
     const withdrawal = result?.data?.withdrawal || null
     api.sendJson(response, 200, {

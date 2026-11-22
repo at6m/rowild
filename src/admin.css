@@ -733,3 +733,14 @@
   .admin-wd-main { grid-template-columns: 1fr; }
   .admin-status { justify-self: start; }
 }
+
+.admin-wd-reason {
+  background: #4a2b33;
+  border-radius: 8px;
+  padding: 8px 11px;
+  color: #f0a8b6;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+.admin-wd-reason strong { font-weight: 700; }

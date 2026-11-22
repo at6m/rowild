@@ -32,15 +32,21 @@ const STATUS_ALIASES = {
 const stateFor = (status) => STATUS_ALIASES[String(status || '').toLowerCase()] || 'pending'
 
 function depositRow(deposit) {
+  const requested = Number(deposit.coin_amount) || 0
+  const credited = Number(deposit.credited_coins) || 0
+  // A partial payment only ever credits what arrived, so the row shows that amount.
+  const partial = credited > 0 && credited < requested
   return {
     uuid: deposit.uuid,
     type: 'crypto deposit',
     state: stateFor(deposit.status),
     status: deposit.status,
-    amount: Number(deposit.coin_amount) || 0,
+    amount: credited || requested,
     currency: 'coins',
     method: `${deposit.pay_currency || 'Crypto'} · ${deposit.network || ''}`.trim(),
-    details: `${deposit.pay_currency || 'Crypto'} deposit`,
+    details: partial
+      ? `${deposit.pay_currency || 'Crypto'} deposit · ${credited.toLocaleString('en-US')} of ${requested.toLocaleString('en-US')} Coins credited`
+      : `${deposit.pay_currency || 'Crypto'} deposit`,
     address: deposit.address || null,
     txid: deposit.provider_payload?.payment?.payin_hash || deposit.provider_payload?.signature || deposit.track_id || null,
     created_at: deposit.created_at,
@@ -59,6 +65,7 @@ function withdrawalRow(withdrawal) {
     currency: 'coins',
     method: `${withdrawal.currency} · ${withdrawal.network}`,
     details: `${withdrawal.currency} withdrawal`,
+    reason: withdrawal.cancel_reason || null,
     address: withdrawal.address || null,
     txid: withdrawal.provider_payload?.txid || withdrawal.provider_payload?.hash || withdrawal.track_id || null,
     created_at: withdrawal.created_at,
