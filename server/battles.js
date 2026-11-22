@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { chanceForced, chanceUniform } from './chance.js'
 import { scheduleBotAttendance } from './botPlayers.js'
 
 const BATTLE_SELECT = '*'
@@ -306,7 +307,32 @@ async function currentEosBlock() {
   }
 }
 
-function resolveBattle(row, eos) {
+async function battleChances({ env, supabaseRequest, row }) {
+  const ids = [...new Set((row.players || [])
+    .filter((player) => !(player.is_bot ?? player.isBot))
+    .map((player) => player.user_uuid ?? player.userUuid)
+    .filter(Boolean))]
+  if (!ids.length) return new Map()
+  try {
+    const query = new URLSearchParams({
+      select: 'user_uuid,game,chance_percent',
+      user_uuid: `in.(${ids.join(',')})`,
+      game: 'in.(battles,all)',
+    })
+    const rows = await supabaseRequest(env, `/rest/v1/rorisk_chance_settings?${query}`)
+    const map = new Map()
+    for (const entry of rows || []) {
+      if (entry.chance_percent === null || entry.chance_percent === undefined) continue
+      // A battles row always beats the player's fallback row.
+      if (!map.has(entry.user_uuid) || entry.game === 'battles') map.set(entry.user_uuid, Number(entry.chance_percent))
+    }
+    return map
+  } catch {
+    return new Map()
+  }
+}
+
+function resolveBattle(row, eos, chanceByUser) {
   const players = [...(row.players || [])].map((entry) => ({
     ...entry,
     is_bot: entry.is_bot ?? entry.isBot ?? false,
@@ -330,6 +356,21 @@ function resolveBattle(row, eos) {
       for (let index = 0; index < items.length; index += 1) {
         cumulative += caseChance(items[index])
         if (roll <= cumulative) { selectedIndex = index; break }
+      }
+      // Win chance (50 = untouched): a forced flip swaps in the best or the
+      // cheapest item for that player only; the battle total still decides the
+      // winner, so opponents are unaffected.
+      const chance = player.is_bot ? null : chanceByUser?.get(player.user_uuid)
+      if (chance !== null && chance !== undefined && chance !== 50 && items.length) {
+        const values = items.map((entry) => currencyIconValue(entry, row.currency))
+        const average = values.reduce((sum, value) => sum + value, 0) / values.length
+        const naturalWin = (values[selectedIndex] || 0) >= average
+        const ticket = chanceUniform(`${row.server_seed}:${eos.blockId}:${battleCase.round_index}:${player.slot}:chance`)
+        if (chanceForced(naturalWin, chance, ticket) !== naturalWin) {
+          const target = naturalWin ? Math.min(...values) : Math.max(...values)
+          const swapped = values.indexOf(target)
+          if (swapped >= 0) selectedIndex = swapped
+        }
       }
       const item = items[selectedIndex] || { name: 'Unknown Item', image: '/assets/users/default-avatar.png', chance: '100%' }
       const itemAmount = currencyIconValue(item, row.currency)
@@ -384,7 +425,8 @@ function resolveBattle(row, eos) {
 async function finalizeIfReady({ row, env, supabaseRequest }) {
   if (!row || row.state !== 'countdown' || (row.players || []).length < row.player_count) return row
   const eos = await currentEosBlock()
-  const resolved = resolveBattle(row, eos)
+  const chanceByUser = await battleChances({ env, supabaseRequest, row })
+  const resolved = resolveBattle(row, eos, chanceByUser)
   await supabaseRequest(env, '/rest/v1/rpc/finalize_rorisk_battle', {
     method: 'POST',
     body: JSON.stringify({

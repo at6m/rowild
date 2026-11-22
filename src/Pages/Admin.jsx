@@ -15,6 +15,7 @@ const GAME_LABELS = {
   battles: 'Case battles',
 }
 const QUICK_RTP = [0, 50, 100, 150, 200]
+const CHANCE_PRESETS = [0, 25, 50, 75, 100]
 const LIVE_POLL_MS = 2500
 const DELTA_LIFETIME_MS = 4000
 const DEFAULT_AVATAR = '/assets/users/default-avatar.png'
@@ -73,6 +74,15 @@ function draftFor(player) {
   const next = { __dirty: false }
   for (const game of GAME_ORDER) {
     const value = player.settings?.[game]
+    next[game] = value === null || value === undefined ? '' : String(value)
+  }
+  return next
+}
+
+function chanceDraftFor(player) {
+  const next = { __dirty: false }
+  for (const game of GAME_ORDER) {
+    const value = player.chance?.[game]
     next[game] = value === null || value === undefined ? '' : String(value)
   }
   return next
@@ -163,6 +173,13 @@ function PlayerRow({ player, expanded, onToggle }) {
     : overrides.length
       ? `${overrides.length} game${overrides.length > 1 ? 's' : ''}`
       : 'default'
+  const chanceActive = player.chance?.all
+  const chanceOverrides = GAME_ORDER.filter((game) => game !== 'all' && player.chance?.[game] !== undefined && player.chance?.[game] !== null)
+  const chanceSummary = chanceActive !== null && chanceActive !== undefined
+    ? `All ${chanceActive}%`
+    : chanceOverrides.length
+      ? `${GAME_LABELS[chanceOverrides[0]]} ${player.chance[chanceOverrides[0]]}%${chanceOverrides.length > 1 ? ` +${chanceOverrides.length - 1}` : ''}`
+      : null
 
   return (
     <button type="button" className={`admin-row admin-player-row${expanded ? ' is-open' : ''}`} onClick={onToggle}>
@@ -187,11 +204,16 @@ function PlayerRow({ player, expanded, onToggle }) {
         {player.rocoinDelta < 0 && <span className="admin-delta down">-{format(Math.abs(player.rocoinDelta))}</span>}
       </span>
       <span className="admin-cell">
-        <span className={`admin-rtp-pill${customised ? ' is-custom' : ''}`}>{summary}</span>
+        <span className="admin-rtp-pills">
+          <span className={`admin-rtp-pill${customised ? ' is-custom' : ''}`}>{summary}</span>
+          {chanceSummary && (
+            <span className="admin-rtp-pill admin-chance-pill is-custom" title="Win chance override">{chanceSummary}</span>
+          )}
+        </span>
       </span>
       <span className="admin-cell admin-cell-muted">{joinedLabel(player.joined_at)}</span>
       <span className="admin-cell admin-cell-action">
-        <span className="admin-manage">Manage RTP<SiteIcon name="chevron-down" className={expanded ? 'is-open' : ''} /></span>
+        <span className="admin-manage">Manage<SiteIcon name="chevron-down" className={expanded ? 'is-open' : ''} /></span>
       </span>
     </button>
   )
@@ -270,6 +292,87 @@ function RtpEditor({ player, defaults, draft, onChange, onQuick, onSave, onReset
   )
 }
 
+function ChanceEditor({ player, draft, onChange, onQuick, onSave, onReset, saving, resetting, disabled }) {
+  const [warningHidden, setWarningHidden] = useState(false)
+
+  return (
+    <div className="admin-rtp admin-chance">
+      <div className="admin-rtp-head">
+        <div>
+          <h3>Win chance for {player.username || 'this player'}</h3>
+          <p>50% is the game’s own RNG. 0–100 is a test tool and only affects this player.</p>
+        </div>
+        <span className="admin-rtp-badge">0% always loses · 100% always wins</span>
+      </div>
+
+      {!warningHidden && (
+        <div className="admin-chance-warning">
+          <span>Forced results do not match the provably-fair seed check — use a test account.</span>
+          <button type="button" className="admin-chance-dismiss" onClick={() => setWarningHidden(true)}>Dismiss</button>
+        </div>
+      )}
+      {disabled && (
+        <p className="admin-chance-note">Win chance storage is not installed yet — apply the Supabase migration first.</p>
+      )}
+
+      <div className="admin-rtp-list">
+        {GAME_ORDER.map((game) => {
+          const value = draft[game] ?? ''
+          const isOverride = String(value).trim() !== ''
+          const isNeutral = isOverride && Number(value) === 50
+          return (
+            <div className="admin-rtp-row" key={game}>
+              <div className="admin-rtp-game">
+                <span>{GAME_LABELS[game]}</span>
+                <small>{game === 'all' ? 'applies to every game unless a game row overrides it' : 'default RNG (50%) when unset'}</small>
+              </div>
+              <div className={`admin-rtp-input${isOverride ? (isNeutral ? ' is-original' : ' is-custom') : ''}`}>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  max="100"
+                  step="1"
+                  placeholder="default RNG"
+                  value={value}
+                  disabled={disabled}
+                  onChange={(event) => onChange(game, event.target.value)}
+                />
+                <span>%</span>
+              </div>
+              <div className="admin-rtp-quick">
+                {CHANCE_PRESETS.map((preset) => (
+                  <button
+                    type="button"
+                    key={preset}
+                    className={String(value).trim() === String(preset) ? 'is-active' : ''}
+                    disabled={disabled}
+                    onClick={() => onQuick(game, preset)}
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+              <button type="button" className="admin-rtp-default" disabled={disabled || !isOverride} onClick={() => onQuick(game, null)}>
+                Default
+              </button>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="admin-rtp-actions">
+        <button type="button" className="admin-btn primary" disabled={disabled || saving || !draft.__dirty} onClick={onSave}>
+          {saving ? 'Saving…' : 'Save win chance'}
+        </button>
+        <button type="button" className="admin-btn ghost" disabled={disabled || saving || resetting} onClick={onReset}>
+          {resetting ? 'Resetting…' : 'Reset all to default'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function Admin({ user, onSignIn }) {
   const [status, setStatus] = useState('loading')
   const [failure, setFailure] = useState(null)
@@ -279,6 +382,9 @@ function Admin({ user, onSignIn }) {
   const [query, setQuery] = useState('')
   const [selectedUuid, setSelectedUuid] = useState(null)
   const [draft, setDraft] = useState({})
+  const [chanceDraft, setChanceDraft] = useState({})
+  const [chanceSaving, setChanceSaving] = useState(false)
+  const [chanceResetting, setChanceResetting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [online, setOnline] = useState([])
@@ -402,6 +508,7 @@ function Admin({ user, onSignIn }) {
     }
     setSelectedUuid(player.uuid)
     setDraft(draftFor(player))
+    setChanceDraft(chanceDraftFor(player))
   }
 
   const dirtyGames = useMemo(() => {
@@ -412,6 +519,15 @@ function Admin({ user, onSignIn }) {
       return String(draft[game] ?? '').trim() !== storedValue.trim()
     })
   }, [draft, selected])
+
+  const dirtyChance = useMemo(() => {
+    if (!selected) return []
+    return GAME_ORDER.filter((game) => {
+      const stored = selected.chance?.[game]
+      const storedValue = stored === null || stored === undefined ? '' : String(stored)
+      return String(chanceDraft[game] ?? '').trim() !== storedValue.trim()
+    })
+  }, [chanceDraft, selected])
 
   const changeDraft = (game, value) => {
     setDraft((current) => ({ ...current, [game]: value, __dirty: true }))
@@ -448,6 +564,65 @@ function Admin({ user, onSignIn }) {
       notify({ type: 'error', message: error.message })
     } finally {
       setSaving(false)
+    }
+  }
+
+  const changeChance = (game, value) => {
+    setChanceDraft((current) => ({ ...current, [game]: value, __dirty: true }))
+  }
+
+  const quickChance = (game, preset) => {
+    setChanceDraft((current) => ({ ...current, [game]: preset === null ? '' : String(preset), __dirty: true }))
+  }
+
+  const saveChance = async () => {
+    if (!selected) return
+    const entries = GAME_ORDER
+      .filter((game) => dirtyChance.includes(game))
+      .map((game) => {
+        const raw = String(chanceDraft[game] ?? '').trim()
+        if (!raw) return { game, chance: null }
+        const value = Number(raw)
+        return { game, chance: Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null }
+      })
+    if (!entries.length) { notify({ type: 'info', message: 'Nothing has changed yet.' }); return }
+    try {
+      setChanceSaving(true)
+      const payload = await adminFetch('/api/admin/chance', {
+        method: 'POST',
+        body: JSON.stringify({ userUuid: selected.uuid, settings: entries }),
+      })
+      setOverview((current) => current ? {
+        ...current,
+        players: current.players.map((player) => player.uuid === selected.uuid ? { ...player, chance: payload.settings || {} } : player),
+      } : current)
+      setChanceDraft(chanceDraftFor({ ...selected, chance: payload.settings || {} }))
+      notify({ type: 'success', message: `Win chance updated for ${selected.username || 'the player'}.` })
+    } catch (error) {
+      notify({ type: 'error', message: error.message })
+    } finally {
+      setChanceSaving(false)
+    }
+  }
+
+  const resetChance = async () => {
+    if (!selected) return
+    try {
+      setChanceResetting(true)
+      await adminFetch('/api/admin/chance/reset', {
+        method: 'POST',
+        body: JSON.stringify({ userUuid: selected.uuid }),
+      })
+      setOverview((current) => current ? {
+        ...current,
+        players: current.players.map((player) => player.uuid === selected.uuid ? { ...player, chance: {} } : player),
+      } : current)
+      setChanceDraft(chanceDraftFor({ ...selected, chance: {} }))
+      notify({ type: 'success', message: 'Every game is back to its own RNG for that player.' })
+    } catch (error) {
+      notify({ type: 'error', message: error.message })
+    } finally {
+      setChanceResetting(false)
     }
   }
 
@@ -771,18 +946,31 @@ function Admin({ user, onSignIn }) {
                 onToggle={() => togglePlayer(player)}
               />
               {selectedUuid === player.uuid && (
-                <RtpEditor
-                  player={player}
-                  defaults={defaults}
-                  draft={draft}
-                  disabled={!overview?.rtpReady}
-                  saving={saving}
-                  resetting={resetting}
-                  onChange={changeDraft}
-                  onQuick={quickDraft}
-                  onSave={saveRtp}
-                  onReset={resetRtp}
-                />
+                <>
+                  <RtpEditor
+                    player={player}
+                    defaults={defaults}
+                    draft={draft}
+                    disabled={!overview?.rtpReady}
+                    saving={saving}
+                    resetting={resetting}
+                    onChange={changeDraft}
+                    onQuick={quickDraft}
+                    onSave={saveRtp}
+                    onReset={resetRtp}
+                  />
+                  <ChanceEditor
+                    player={player}
+                    draft={chanceDraft}
+                    disabled={!overview?.chanceReady}
+                    saving={chanceSaving}
+                    resetting={chanceResetting}
+                    onChange={changeChance}
+                    onQuick={quickChance}
+                    onSave={saveChance}
+                    onReset={resetChance}
+                  />
+                </>
               )}
             </div>
           ))}

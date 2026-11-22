@@ -92,6 +92,16 @@ async function readRtp(env) {
   }
 }
 
+async function readChance(env) {
+  try {
+    const settings = await query(env, '/rest/v1/rorisk_chance_settings?select=user_uuid,game,chance_percent')
+    return { ready: true, settings: settings.data || [] }
+  } catch (error) {
+    if (isMissingTable(error)) return { ready: false, settings: [] }
+    throw error
+  }
+}
+
 async function readPresence(env) {
   const since = new Date(Date.now() - ONLINE_WINDOW_MS).toISOString()
   try {
@@ -123,6 +133,17 @@ function groupSettings(settings) {
   return grouped
 }
 
+function groupChance(settings) {
+  const grouped = new Map()
+  for (const row of settings) {
+    if (!row?.user_uuid) continue
+    const current = grouped.get(row.user_uuid) || {}
+    current[row.game] = row.chance_percent === null ? null : Number(row.chance_percent)
+    grouped.set(row.user_uuid, current)
+  }
+  return grouped
+}
+
 async function overview(context) {
   const { env, url, api, response } = context
   await requireAdmin(context)
@@ -137,30 +158,37 @@ async function overview(context) {
     playersPath += `&or=(username.ilike.${term},email.ilike.${term})`
   }
 
-  const [playersResult, rtp, presenceResult] = await Promise.all([
+  const [playersResult, rtp, chance, presenceResult] = await Promise.all([
     query(env, playersPath, { prefer: 'count=exact' }),
     readRtp(env),
+    readChance(env),
     readPresence(env),
   ])
 
   const online = onlineUserIds(presenceResult.rows)
   const grouped = groupSettings(rtp.settings)
+  const chanceGrouped = groupChance(chance.settings)
   const total = playersResult.total ?? (playersResult.data?.length || 0)
   const totalPages = Math.max(1, Math.ceil(total / limit))
   const players = (playersResult.data || []).map((player) => ({
     ...player,
     online: online.has(player.uuid),
     settings: grouped.get(player.uuid) || {},
+    chance: chanceGrouped.get(player.uuid) || {},
   }))
 
   const customized = new Set(
     rtp.settings.filter((row) => row.rtp_percent !== null && row.rtp_percent !== undefined).map((row) => row.user_uuid),
+  ).size
+  const chanceCustomised = new Set(
+    chance.settings.filter((row) => row.chance_percent !== null && row.chance_percent !== undefined).map((row) => row.user_uuid),
   ).size
 
   api.sendJson(response, 200, {
     players,
     defaults: rtp.defaults,
     rtpReady: rtp.ready,
+    chanceReady: chance.ready,
     presenceReady: presenceResult.ready,
     pagination: {
       page,
@@ -175,6 +203,7 @@ async function overview(context) {
       players: total,
       online: online.size,
       customized,
+      chanceCustomised,
       games: rtp.defaults.length,
     },
     search,
@@ -281,6 +310,83 @@ async function resetRtp(context) {
   } catch (error) {
     if (isMissingTable(error)) {
       throw httpError('The RTP tables are not installed yet. Apply the Supabase migration first.', 409, 'RTP_NOT_INSTALLED')
+    }
+    throw error
+  }
+  api.sendJson(response, 200, { settings: {} })
+}
+
+function parseChanceEntries(body) {
+  const entries = Array.isArray(body?.settings) ? body.settings.slice(0, 24) : []
+  if (!entries.length) throw httpError('There is nothing to save.', 400)
+  const clears = []
+  const upserts = []
+  for (const entry of entries) {
+    const game = String(entry?.game || '').trim()
+    if (!GAMES.has(game)) throw httpError('That game is not recognised.', 400)
+    const raw = entry?.chance
+    if (raw === null || raw === undefined || String(raw).trim() === '') {
+      clears.push(game)
+      continue
+    }
+    const value = Number(raw)
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+      throw httpError('Win chance must be between 0 and 100, or default.', 400)
+    }
+    upserts.push({ game, chance_percent: Math.round(value * 100) / 100 })
+  }
+  return { upserts, clears }
+}
+
+async function saveChance(context) {
+  const { request, env, api, response } = context
+  await requireAdmin(context)
+  const body = await api.readJson(request)
+  const userUuid = String(body?.userUuid || '')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userUuid)) {
+    throw httpError('That player is not valid.', 400)
+  }
+  const { upserts, clears } = parseChanceEntries(body)
+
+  try {
+    if (upserts.length) {
+      await query(env, '/rest/v1/rorisk_chance_settings?on_conflict=user_uuid,game', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates,return=minimal',
+        body: upserts.map((entry) => ({ ...entry, user_uuid: userUuid })),
+      })
+    }
+    for (const game of clears) {
+      await query(env, `/rest/v1/rorisk_chance_settings?user_uuid=eq.${userUuid}&game=eq.${encodeURIComponent(game)}`, {
+        method: 'DELETE',
+        prefer: 'return=minimal',
+      })
+    }
+  } catch (error) {
+    if (isMissingTable(error)) {
+      throw httpError('The win chance tables are not installed yet. Apply the Supabase migration first.', 409, 'CHANCE_NOT_INSTALLED')
+    }
+    throw error
+  }
+
+  const { data } = await query(env, `/rest/v1/rorisk_chance_settings?user_uuid=eq.${userUuid}&select=game,chance_percent,updated_at`)
+  const settings = groupChance(data || [])
+  api.sendJson(response, 200, { settings: settings.get(userUuid) || {}, rows: data || [] })
+}
+
+async function resetChance(context) {
+  const { request, env, api, response } = context
+  await requireAdmin(context)
+  const body = await api.readJson(request)
+  const userUuid = String(body?.userUuid || '')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userUuid)) {
+    throw httpError('That player is not valid.', 400)
+  }
+  try {
+    await query(env, `/rest/v1/rorisk_chance_settings?user_uuid=eq.${userUuid}`, { method: 'DELETE', prefer: 'return=minimal' })
+  } catch (error) {
+    if (isMissingTable(error)) {
+      throw httpError('The win chance tables are not installed yet. Apply the Supabase migration first.', 409, 'CHANCE_NOT_INSTALLED')
     }
     throw error
   }
@@ -512,6 +618,14 @@ export async function handleAdminRequest(context) {
     }
     if (url.pathname === '/api/admin/rtp/reset' && request.method === 'POST') {
       await resetRtp(context)
+      return true
+    }
+    if (url.pathname === '/api/admin/chance' && request.method === 'POST') {
+      await saveChance(context)
+      return true
+    }
+    if (url.pathname === '/api/admin/chance/reset' && request.method === 'POST') {
+      await resetChance(context)
       return true
     }
     if (url.pathname === '/api/admin/withdrawals' && request.method === 'GET') {

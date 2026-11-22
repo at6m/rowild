@@ -312,6 +312,13 @@
   font-weight: 600;
 }
 .admin-rtp-pill.is-custom { background: #f7de501f; color: #f7de50; }
+.admin-rtp-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.admin-chance-pill.is-custom { background: #ffb0201f; color: #ffc861; }
 .admin-manage {
   display: inline-flex;
   align-items: center;
@@ -480,6 +487,40 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+.admin-chance {
+  margin-top: 16px;
+  padding-top: 18px;
+  border-top: 1px solid #2f4a62;
+}
+.admin-chance-warning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid #f7de5066;
+  border-radius: 9px;
+  background: #f7de5014;
+  color: #f7de50;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.admin-chance-dismiss {
+  flex: none;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.admin-chance-note {
+  margin: 0 0 12px;
+  color: #ff9aa5;
+  font-size: 12px;
 }
 .admin-btn {
   display: inline-flex;
