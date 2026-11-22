@@ -63,7 +63,7 @@ export async function handlePaymentsRequest({ request, response, url, env, api }
     const sessionUser = requestSessionUser(request, env)
     if (!sessionUser?.uuid) throw new Error('Please sign in to perform this action.')
     const body = await readJson(request)
-    const payment = await createDeposit({ env, supabaseRequest, user: sessionUser, coinAmount: body.coinAmount, key: body.currency, coinsPerUsd: COINS_PER_USD, request })
+    const payment = await createDeposit({ env, supabaseRequest, user: sessionUser, key: body.currency, coinsPerUsd: COINS_PER_USD, request })
     sendJson(response, 200, { payment })
     return true
   }

@@ -273,13 +273,13 @@ function CryptoDeposit({ method, user }) {
   const [usd, setUsd] = useState('10.00')
   const [bonus, setBonus] = useState('')
   const [price, setPrice] = useState(null)
-  const [minimumUsd, setMinimumUsd] = useState(0)
   const [quoteReady, setQuoteReady] = useState(false)
   const [config, setConfig] = useState(null)
   const [payment, setPayment] = useState(null)
   const [status, setStatus] = useState(null)
   const [creditedCoins, setCreditedCoins] = useState(0)
   const [receivedAmount, setReceivedAmount] = useState(0)
+  const [usdReceived, setUsdReceived] = useState(0)
   const [settled, setSettled] = useState(false)
   const creditedRef = useRef(0)
   const [loading, setLoading] = useState(false)
@@ -306,17 +306,6 @@ function CryptoDeposit({ method, user }) {
         if (controller.signal.aborted || !response.ok) return
         const value = Number(payload.priceUsd)
         if (Number.isFinite(value) && value > 0) setPrice(value)
-        const minimum = Number(payload.minimumUsd)
-        if (Number.isFinite(minimum) && minimum > 0) {
-          setMinimumUsd(minimum)
-          // Some coins (USDT on TRC-20 among them) have a live minimum above the
-          // $10 default, so start the form at an amount the provider accepts.
-          if (minimum > 10) {
-            const seeded = Math.ceil(minimum * 100)
-            setUsd((current) => (Number(current) === 10 ? (seeded / 100).toFixed(2) : current))
-            setCoins((current) => (current === '1,000' ? String(seeded) : current))
-          }
-        }
       } catch (error) {
         if (error?.name !== 'AbortError') setPrice(null)
       } finally {
@@ -328,12 +317,9 @@ function CryptoDeposit({ method, user }) {
     return () => controller.abort()
   }, [currency])
   const unavailable = Boolean(config) && (!config.enabled || !config.deposits?.some((entry) => entry.key === currency && entry.available))
-  const belowMinimum = !payment && minimumUsd > 0 && (Number(usd) || 0) < minimumUsd
-  const crypto = payment
-    ? Number(payment.payAmount || 0).toFixed(8)
-    : price
-      ? ((Number(usd) || 0) / price).toFixed(8)
-      : '0.00000000'
+  // Cosmetic only: the middle box previews the live rate for the amount typed
+  // beside it. The deposit itself accepts whatever the player sends.
+  const crypto = price ? ((Number(usd) || 0) / price).toFixed(8) : '0.00000000'
   const displayedPrice = price
     ? `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: price < 1 ? 8 : 2 })}`
     : 'Unavailable'
@@ -358,32 +344,33 @@ function CryptoDeposit({ method, user }) {
   }
   const createDeposit = useCallback(async () => {
     if (!user) return notify({ type: 'error', message: 'Please sign in to perform this action.' })
-    const coinAmount = Math.floor(Number(String(coins).replace(/,/g, '')) || 0)
-    if (coinAmount < 100) return notify({ type: 'error', message: 'Minimum deposit amount is $1.00 USD.' })
     setLoading(true)
     try {
-      const response = await fetch('/api/payments/nowpayments/deposit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coinAmount, currency }) })
+      const response = await fetch('/api/payments/nowpayments/deposit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ currency }) })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error || 'Unable to generate a deposit address.')
       setPayment(payload.payment)
       setStatus(payload.payment.status || 'pending')
-      setUsd(Number(payload.payment.usdAmount || 0).toFixed(2))
-      if (Number(payload.payment.payAmount) > 0) setPrice(Number(payload.payment.usdAmount || 0) / Number(payload.payment.payAmount))
+      setCreditedCoins(0)
+      setReceivedAmount(0)
+      setUsdReceived(0)
+      setSettled(false)
+      creditedRef.current = 0
     } catch (error) {
       notify({ type: 'error', message: error.message || 'Unable to generate a deposit address.' })
     } finally {
       setLoading(false)
     }
-  }, [coins, currency, user])
+  }, [currency, user])
   useEffect(() => {
-    // One payment request per visit; the button regenerates it on demand.
-    if (!user || !config?.enabled || unavailable || belowMinimum || !quoteReady || automaticRequestRef.current) return undefined
+    // One address per visit; the button replaces it on demand.
+    if (!user || !config?.enabled || unavailable || !quoteReady || automaticRequestRef.current) return undefined
     automaticRequestRef.current = true
     const timer = window.setTimeout(() => { void createDeposit() }, 0)
     return () => window.clearTimeout(timer)
-  }, [belowMinimum, config, createDeposit, quoteReady, unavailable, user])
+  }, [config, createDeposit, quoteReady, unavailable, user])
   useEffect(() => {
-    if (!payment?.paymentId || settled || status === 'expired') return undefined
+    if (!payment?.paymentId || settled) return undefined
     let disposed = false
     const poll = async () => {
       try {
@@ -394,8 +381,11 @@ function CryptoDeposit({ method, user }) {
         const next = deposit.status
         if (!next) return
         setStatus(next)
-        if (deposit.credited) setSettled(true)
         if (deposit.receivedAmount !== undefined) setReceivedAmount(Number(deposit.receivedAmount) || 0)
+        if (deposit.usdReceived !== undefined) setUsdReceived(Number(deposit.usdReceived) || 0)
+        // Only a terminal provider status ends the session: the same address
+        // keeps accepting top-ups while the cashier stays open.
+        if (['paid', 'expired', 'failed', 'refunded'].includes(next)) setSettled(true)
         const credited = Number(deposit.creditedCoins) || 0
         if (credited > creditedRef.current) {
           const delta = credited - creditedRef.current
@@ -410,15 +400,7 @@ function CryptoDeposit({ method, user }) {
     void poll()
     const timer = window.setInterval(poll, 5000)
     return () => { disposed = true; window.clearInterval(timer) }
-  }, [payment?.paymentId, settled, status])
-  const resetPayment = () => {
-    setPayment(null)
-    setStatus(null)
-    setCreditedCoins(0)
-    setReceivedAmount(0)
-    setSettled(false)
-    creditedRef.current = 0
-  }
+  }, [payment?.paymentId, settled])
   return <div className="modal-crypto" {...cryptoModalScope}>
     <div className="crypto-content" {...cryptoModalScope}>
       <div className="crypto-header" {...cryptoModalScope}><div className="header-text" {...cryptoModalScope}>Deposit Crypto</div></div>
@@ -426,27 +408,71 @@ function CryptoDeposit({ method, user }) {
         <div className="deposit-header" {...cryptoDepositScope}><div className="header-icon" {...cryptoDepositScope}><img src={method[2]} alt="crypto icon" {...cryptoDepositScope} /></div><div className="header-text" {...cryptoDepositScope}><div className="header-title" {...cryptoDepositScope}>Deposit {detail.name}</div><div className="header-price" {...cryptoDepositScope}>{displayedPrice}</div></div></div>
         <div className="deposit-card" {...cryptoDepositScope}>
           <div className="card-qrcode" {...cryptoDepositScope}><div className="qrcode-content" {...cryptoDepositScope}>{payment?.qrCode ? <img className="placeholder-qr" src={payment.qrCode} alt="Deposit QR code" {...cryptoDepositScope} /> : <PlaceholderQr />}</div></div>
-          <div className="card-info" {...cryptoDepositScope}><div className="info-instructions" {...cryptoDepositScope}>Send exactly {payment ? `${payment.payAmount} ${payment.currency}` : `the generated amount of ${detail.name}`} to receive the equivalent in Coins. Only send through the {detail.network} network to this address.</div><div className="info-address" {...cryptoDepositScope}><div className="address-label" {...cryptoDepositScope}>Your personal {detail.name} deposit address:</div><div className="address-input" {...cryptoDepositScope}><div className="input-content" {...cryptoDepositScope}><input type="text" readOnly value={payment?.address || ''} aria-label={`${detail.name} deposit address`} {...cryptoDepositScope} /><button className="button-copy" type="button" title="Copy to clipboard" disabled={!payment?.address} onClick={copyAddress} {...cryptoDepositScope}><CopyIcon {...cryptoDepositScope} /></button></div></div>{payment?.memo && <div className="address-label" {...cryptoDepositScope}>Include this memo / tag with the transfer: {payment.memo}</div>}</div></div>
+          <div className="card-info" {...cryptoDepositScope}>
+            <div className="info-instructions" {...cryptoDepositScope}>
+              {payment
+                ? <>Send any amount of {detail.name} to this address — your Coins are credited automatically at the live rate. Only send through the {detail.network} network.</>
+                : <>Generating your personal {detail.name} address — you can send any amount once it appears.</>}
+            </div>
+            <div className="info-address" {...cryptoDepositScope}>
+              <div className="address-label" {...cryptoDepositScope}>Your personal {detail.name} deposit address:</div>
+              <div className="address-input" {...cryptoDepositScope}>
+                <div className="input-content" {...cryptoDepositScope}>
+                  <input type="text" readOnly value={payment?.address || ''} aria-label={`${detail.name} deposit address`} {...cryptoDepositScope} />
+                  <button className="button-copy" type="button" title="Copy to clipboard" disabled={!payment?.address} onClick={copyAddress} {...cryptoDepositScope}><CopyIcon {...cryptoDepositScope} /></button>
+                </div>
+              </div>
+              {payment?.memo && <div className="address-label" {...cryptoDepositScope}>Include this memo / tag with the transfer: {payment.memo}</div>}
+            </div>
+          </div>
         </div>
         <div className="solana-deposit-status" data-status={status || 'idle'} {...cryptoDepositScope}>
           <div className="solana-status-line" {...cryptoDepositScope}>
-            {settled || status === 'paid'
-              ? `Payment confirmed — ${Number(creditedCoins || payment?.coinAmount || 0).toLocaleString('en-US')} Coins credited to your balance.`
+            {settled && status === 'paid' && creditedCoins > 0
+              ? `Payment complete — ${creditedCoins.toLocaleString('en-US')} Coins credited to your balance.`
               : creditedCoins > 0
-                ? `Partially paid — ${receivedAmount} ${payment?.currency || ''} received so far and ${creditedCoins.toLocaleString('en-US')} Coins credited. Send the rest to the same address before this request expires.`
-                : status === 'expired'
-                  ? 'This payment request expired. Generate a new address to continue.'
-                : belowMinimum
-                  ? `The minimum ${detail.name} deposit is $${minimumUsd.toFixed(2)} right now — raise the amount to continue.`
-                  : unavailable
-                    ? 'Crypto deposits are not configured on this server.'
-                    : payment
-                      ? 'Waiting for your transfer — this page checks the payment status every few seconds.'
-                      : 'Choose an amount, then scan the QR code with your wallet.'}
+                ? `Received ${receivedAmount} ${payment?.currency || ''}${usdReceived > 0 ? ` ($${usdReceived.toFixed(2)})` : ''} — ${creditedCoins.toLocaleString('en-US')} Coins credited. You can keep sending to this address.`
+                : settled && (status === 'failed' || status === 'refunded')
+                  ? 'This payment was refunded — nothing was credited.'
+                  : status === 'expired'
+                    ? 'This deposit address expired. Generate a new one to continue.'
+                    : settled
+                      ? 'Payment complete — nothing was credited.'
+                      : unavailable
+                        ? 'Crypto deposits are not configured on this server.'
+                        : payment
+                          ? 'Waiting for your transfer — Coins are credited automatically as soon as it arrives.'
+                          : 'Preparing your deposit address…'}
           </div>
         </div>
         {user && <div className="deposit-bonus" {...cryptoDepositScope}><div className="bonus-title-row" {...cryptoDepositScope}><span className="bonus-title" {...cryptoDepositScope}>Deposit Bonus Code</span></div><div className="bonus-row" {...cryptoDepositScope}><div className="bonus-input-wrap" {...cryptoDepositScope}><input type="text" placeholder="Enter code" maxLength="32" value={bonus} onChange={(event) => setBonus(event.target.value)} {...cryptoDepositScope} /></div><button className="bonus-apply-button" type="button" disabled={!bonus.trim()} onClick={() => notify({ type: 'error', message: 'Your entered deposit bonus code is invalid.' })} {...cryptoDepositScope}>Apply</button></div></div>}
-        <div className="deposit-exchange" {...cryptoDepositScope}><div className="exchange-title" {...cryptoDepositScope}>Exchange</div><div className="exchange-content" {...cryptoDepositScope}><div className="exchange-element" {...cryptoDepositScope}><div className="element-content" {...cryptoDepositScope}><img src="/assets/currency/coin.svg" alt="icon" {...cryptoDepositScope} /><input type="text" inputMode="numeric" placeholder="0" value={coins} disabled={loading || Boolean(payment)} onChange={(event) => fromCoins(event.target.value)} onBlur={() => setCoins(formatInteger(coins))} {...cryptoDepositScope} /></div></div><span className="equals" {...cryptoDepositScope}>=</span><div className="exchange-element" {...cryptoDepositScope}><div className="element-content" {...cryptoDepositScope}><img src={method[2]} alt="" {...cryptoDepositScope} /><input type="text" placeholder="0" value={crypto} readOnly {...cryptoDepositScope} /></div></div><span className="equals" {...cryptoDepositScope}>=</span><div className="exchange-element" {...cryptoDepositScope}><div className="element-content element-usd" {...cryptoDepositScope}><div className="usd-icon" {...cryptoDepositScope}><img src="/assets/currency/usd.4027001f.svg" alt="USD icon" {...cryptoDepositScope} /></div><input type="text" inputMode="decimal" placeholder="0.00" value={usd} disabled={loading || Boolean(payment)} onChange={(event) => fromUsd(event.target.value)} onBlur={() => setUsd((Number(usd) || 0).toFixed(2))} {...cryptoDepositScope} /></div></div></div><button className="button-withdraw" type="button" disabled={loading || unavailable || belowMinimum || status === 'paid'} onClick={payment ? resetPayment : createDeposit} {...cryptoDepositScope}><div className="button-inner" {...cryptoDepositScope}><div className="inner-content" {...cryptoDepositScope}>{loading ? 'Generating...' : payment ? 'New Payment Request' : 'Generate Deposit Address'}</div></div></button></div>
+        <div className="deposit-exchange" {...cryptoDepositScope}>
+          <div className="exchange-title" {...cryptoDepositScope}>Exchange</div>
+          <div className="exchange-content" {...cryptoDepositScope}>
+            <div className="exchange-element" {...cryptoDepositScope}>
+              <div className="element-content" {...cryptoDepositScope}>
+                <img src="/assets/currency/coin.svg" alt="icon" {...cryptoDepositScope} />
+                <input type="text" inputMode="numeric" placeholder="0" value={coins} onChange={(event) => fromCoins(event.target.value)} onBlur={() => setCoins(formatInteger(coins))} {...cryptoDepositScope} />
+              </div>
+            </div>
+            <span className="equals" {...cryptoDepositScope}>=</span>
+            <div className="exchange-element" {...cryptoDepositScope}>
+              <div className="element-content" {...cryptoDepositScope}>
+                <img src={method[2]} alt="" {...cryptoDepositScope} />
+                <input type="text" placeholder="0" value={crypto} readOnly {...cryptoDepositScope} />
+              </div>
+            </div>
+            <span className="equals" {...cryptoDepositScope}>=</span>
+            <div className="exchange-element" {...cryptoDepositScope}>
+              <div className="element-content element-usd" {...cryptoDepositScope}>
+                <div className="usd-icon" {...cryptoDepositScope}><img src="/assets/currency/usd.4027001f.svg" alt="USD icon" {...cryptoDepositScope} /></div>
+                <input type="text" inputMode="decimal" placeholder="0.00" value={usd} onChange={(event) => fromUsd(event.target.value)} onBlur={() => setUsd((Number(usd) || 0).toFixed(2))} {...cryptoDepositScope} />
+              </div>
+            </div>
+          </div>
+          <div className="exchange-caption" {...cryptoDepositScope}>Estimate only — you can send any amount.</div>
+        </div>
+        <button className="button-withdraw" type="button" disabled={loading || unavailable} onClick={createDeposit} {...cryptoDepositScope}><div className="button-inner" {...cryptoDepositScope}><div className="inner-content" {...cryptoDepositScope}>{loading ? 'Generating...' : payment ? 'New Deposit Address' : 'Get Deposit Address'}</div></div></button>
       </div>
     </div>
   </div>

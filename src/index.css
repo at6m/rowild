@@ -6950,6 +6950,11 @@ aside#chat .chat-toggle button .button-inner[data-v-7b767a0f] {
   font-weight: 600;
   color: #fff;
 }
+.cashier-crypto-deposit .exchange-caption[data-v-bcfd5424] {
+  margin-top: -4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, .55);
+}
 .cashier-crypto-deposit .exchange-content[data-v-bcfd5424] {
   display: flex;
   align-items: center;

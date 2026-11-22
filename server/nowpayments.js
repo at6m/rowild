@@ -22,6 +22,9 @@ const ESTIMATE_TTL_MS = 60 * 1000
 const STATUS_POLL_INTERVAL_MS = 4000
 
 export const MIN_DEPOSIT_COINS = 100
+// The invoice every deposit address is created against. It is never shown to the
+// player and never caps a credit: senders pay any amount and get its value.
+export const REFERENCE_DEPOSIT_USD = 10
 export const MAX_COIN_AMOUNT = 100000000
 export const MIN_WITHDRAW_COINS = 1000
 
@@ -229,14 +232,18 @@ function receivedCryptoAmount(payment, status) {
 export function publicDeposit(deposit, result = {}) {
   const creditedCoins = Number(result.deposit?.credited_coins ?? deposit.credited_coins) || 0
   const credited = Boolean(result.deposit?.credited) || Boolean(deposit.credited)
+  const receivedAmount = Number(deposit.received_amount) || 0
+  const payAmount = Number(deposit.pay_amount) || 0
+  const usdAmount = Number(deposit.usd_amount) || 0
+  const usdReceived = payAmount > 0 ? Number(((receivedAmount / payAmount) * usdAmount).toFixed(2)) : 0
   const status = credited ? 'paid' : result.status || deposit.status
   const expired = status === 'expired' || (status === 'pending' && deposit.expires_at && Date.now() > new Date(deposit.expires_at).getTime())
   return {
     orderId: deposit.uuid,
     paymentId: deposit.track_id,
     coinAmount: Number(deposit.coin_amount) || 0,
-    usdAmount: Number(deposit.usd_amount) || 0,
-    payAmount: Number(deposit.pay_amount) || 0,
+    usdAmount,
+    payAmount,
     currency: deposit.pay_currency,
     network: deposit.network,
     address: deposit.address,
@@ -245,28 +252,26 @@ export function publicDeposit(deposit, result = {}) {
     status,
     credited,
     creditedCoins,
-    receivedAmount: Number(deposit.received_amount) || 0,
-    expectedAmount: Number(deposit.pay_amount) || 0,
+    receivedAmount,
+    usdReceived,
+    expectedAmount: payAmount,
     partiallyPaid: creditedCoins > 0 && !credited,
     expired: Boolean(expired),
     expiresAt: deposit.expires_at || null,
   }
 }
 
-export async function createDeposit({ env, supabaseRequest, user, coinAmount, key, coinsPerUsd, request }) {
+export async function createDeposit({ env, supabaseRequest, user, key, coinsPerUsd, request }) {
   if (!user?.uuid) throw new Error('Please sign in to perform this action.')
   if (!settings(env).enabled) throw new Error('Crypto deposits are not configured on this server.')
-  const coins = Math.trunc(Number(coinAmount))
-  if (!Number.isSafeInteger(coins) || coins < MIN_DEPOSIT_COINS || coins > MAX_COIN_AMOUNT) {
-    throw new Error(`Enter a deposit amount between ${MIN_DEPOSIT_COINS.toLocaleString('en-US')} and ${MAX_COIN_AMOUNT.toLocaleString('en-US')} Coins.`)
-  }
-
   const method = await methodForKey(env, 'deposit', key)
-  const usdAmount = Number((coins / coinsPerUsd).toFixed(2))
+  // The provider needs an invoice amount, but the player never picks one: every
+  // address is created against a reference and credits whatever arrives at the
+  // same rate, so this number is invisible and never caps a deposit. It is
+  // raised to the live provider minimum so address creation never fails.
   const minimum = await minimumUsd(env, method.payCurrency)
-  if (minimum !== null && usdAmount < minimum) {
-    throw new Error(`The minimum ${method.name} deposit is $${minimum.toFixed(2)}.`)
-  }
+  const usdAmount = Number((Math.max(REFERENCE_DEPOSIT_USD, Number(minimum) || 0)).toFixed(2))
+  const coins = Math.max(1, Math.round(usdAmount * coinsPerUsd))
 
   const orderId = randomUUID()
   await supabaseRequest(env, '/rest/v1/rorisk_crypto_deposits', {
@@ -289,6 +294,7 @@ export async function createDeposit({ env, supabaseRequest, user, coinAmount, ke
         price_amount: usdAmount,
         price_currency: 'usd',
         pay_currency: method.payCurrency,
+        is_fixed_rate: false,
         ...(callbackUrl ? { ipn_callback_url: callbackUrl } : {}),
         order_id: orderId,
         order_description: `RoWild Coins deposit ${orderId}`,
@@ -384,7 +390,11 @@ async function finalizeDeposit({ env, supabaseRequest, payment, orderId }) {
  * cannot reach a local dev server still credits through here.
  */
 export async function refreshDeposit({ env, supabaseRequest, deposit }) {
-  if (deposit.credited) return { status: 'paid', credited: true, user: null }
+  // A credited deposit is only final once the provider says the payment is:
+  // until then the same address can still take a top-up.
+  if (deposit.credited && ['paid', 'expired', 'failed', 'refunded'].includes(deposit.status)) {
+    return { status: deposit.status, credited: true, user: null }
+  }
   if (deposit.provider_payload?.provider !== 'nowpayments' || !deposit.track_id) {
     return { status: deposit.status, credited: false }
   }

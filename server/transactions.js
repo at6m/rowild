@@ -32,21 +32,22 @@ const STATUS_ALIASES = {
 const stateFor = (status) => STATUS_ALIASES[String(status || '').toLowerCase()] || 'pending'
 
 function depositRow(deposit) {
-  const requested = Number(deposit.coin_amount) || 0
   const credited = Number(deposit.credited_coins) || 0
-  // A partial payment only ever credits what arrived, so the row shows that amount.
-  const partial = credited > 0 && credited < requested
+  const ticker = deposit.pay_currency || 'Crypto'
+  // Deposits take any amount, so the row reports what was credited instead of
+  // comparing it with a requested total that no longer exists.
+  const settledByCredit = credited > 0 && ['paid', 'partially_paid'].includes(String(deposit.status || '').toLowerCase())
   return {
     uuid: deposit.uuid,
     type: 'crypto deposit',
-    state: stateFor(deposit.status),
+    state: settledByCredit ? 'completed' : stateFor(deposit.status),
     status: deposit.status,
-    amount: credited || requested,
+    amount: credited,
     currency: 'coins',
     method: `${deposit.pay_currency || 'Crypto'} · ${deposit.network || ''}`.trim(),
-    details: partial
-      ? `${deposit.pay_currency || 'Crypto'} deposit · ${credited.toLocaleString('en-US')} of ${requested.toLocaleString('en-US')} Coins credited`
-      : `${deposit.pay_currency || 'Crypto'} deposit`,
+    details: credited > 0
+      ? `${ticker} deposit · ${credited.toLocaleString('en-US')} Coins credited`
+      : `${ticker} deposit · Waiting for your transfer`,
     address: deposit.address || null,
     txid: deposit.provider_payload?.payment?.payin_hash || deposit.provider_payload?.signature || deposit.track_id || null,
     created_at: deposit.created_at,
