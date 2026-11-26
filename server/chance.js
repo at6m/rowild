@@ -36,6 +36,11 @@ export async function chancePercentFor(env, supabaseRequest, userUuid, game) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ p_user_uuid: userUuid, p_game: game }),
     })
+    // No row (or a row holding null) is the "default RNG" case and the RPC
+    // answers with SQL null, which PostgREST sends as JSON null. Number(null)
+    // is 0, and a chance of 0 means "always lose", so an unset value has to
+    // stay unset rather than collapse to zero.
+    if (value === null || value === undefined || value === '') return null
     const number = Number(value)
     return Number.isFinite(number) ? number : null
   } catch {
@@ -46,7 +51,7 @@ export async function chancePercentFor(env, supabaseRequest, userUuid, game) {
 
 /** Decides whether this round is forced, and which way. */
 export function blackjackForcedOutcome(chance, seed) {
-  if (chance === null || chance === undefined) return null
+  if (chance === null || chance === undefined || chance === '') return null
   const value = Number(chance)
   if (!Number.isFinite(value) || value === DEFAULT_CHANCE) return null
   const draw = chanceUniform(`${seed}:blackjack:chance`)
